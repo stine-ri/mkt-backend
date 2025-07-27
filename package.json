@@ -5,7 +5,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsup src/index.ts --watch",
     "build": "tsc",
     "start": "node dist/index.js",
     "generate:migration": "drizzle-kit generate",
@@ -39,6 +39,7 @@
     "@types/pg": "^8.11.11",
     "@types/ws": "^8.18.1",
     "drizzle-kit": "^0.31.4",
+    "tsup": "^8.5.0",
     "tsx": "^4.7.1",
     "typescript": "^5.8.3"
   },
