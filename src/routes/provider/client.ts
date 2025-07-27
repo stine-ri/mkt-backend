@@ -10,8 +10,8 @@ import {
   providers,
   providerServices,
   users
-} from '../../drizzle/schema';
-import { authMiddleware, clientRoleAuth } from '../../middleware/bearAuth';
+} from '../../drizzle/schema.js';
+import { authMiddleware, clientRoleAuth } from '../../middleware/bearAuth.js';
 
 const app = new Hono()
   .use('*', authMiddleware)
