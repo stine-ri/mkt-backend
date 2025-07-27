@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
-import { listUsers, getUser, createUser, updateUser, deleteUser } from "./users.controller";
+import { listUsers, getUser, createUser, updateUser, deleteUser } from "./users.controller.js";
 import { usersSchema } from "./validator";
 import { adminRoleAuth } from "../middleware/bearAuth";
 import { db } from "../drizzle/db"; // Your Drizzle DB connection
