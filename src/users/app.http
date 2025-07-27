@@ -1,0 +1,42 @@
+###
+GET http://localhost:3000/api/users
+Authorization:eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOnsiZnVsbF9uYW1lIjoiQ2hyaXN0aW5lIFJpYW4gIiwiY29udGFjdF9waG9uZSI6IjA3OTkwODcxODgiLCJhZGRyZXNzIjoiOTAga2VueWEiLCJpZCI6MX0sInJvbGUiOiJhZG1pbiIsImV4cCI6MTc0MzM3NjI4OH0.VK7FdTHmnPcXKXclkukBnMWRivt5PZXdtxmeAloNfIk
+###
+// Getting by ID
+GET http://localhost:3000/api/users/1
+Authorization: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOnsiZnVsbF9uYW1lIjoiQ2hyaXN0aW5lIFJpYW4gIiwiY29udGFjdF9waG9uZSI6IjA3OTkwODcxODgiLCJhZGRyZXNzIjoiOTAga2VueWEiLCJpZCI6Nn0sInJvbGUiOiJhZG1pbiIsImV4cCI6MTczODE3MDI2NH0.fAIrnvN5CoQFxtORqHHxs9blFj_v3ADfQ5LNivr2An8
+###
+
+###
+POST http://localhost:3000/api/users
+Content-Type: application/json
+
+{
+
+   "full_name": "Johnm Doe",
+   "email": "john@example.com",
+   "contact_phone": "-7890",
+   "address": "123  NY 10001",
+   "role": "admin"
+}
+###
+PUT http://localhost:3000/api/users/7
+Content-Type: application/json
+
+{
+
+   "contact_phone": "0705912632"
+}
+###
+
+DELETE http://localhost:3000/api/users/1
+Authorization: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOnsiZnVsbF9uYW1lIjoiQ2hyaXN0aW5lIFJpYW4gIiwiY29udGFjdF9waG9uZSI6IjA3OTkwODcxODgiLCJhZGRyZXNzIjoiNzAga3V0dXMiLCJpZCI6MX0sInJvbGUiOiJhZG1pbiIsImV4cCI6MTczODE2NTQ0NX0.OYB-jpwj6PAabV6osCMDkE3st8YTUosfKYijpzHEKMA
+
+###
+POST http://localhost:3000/api/send-meet-link
+Content-Type: application/json
+
+{
+  "bookingId": 29,
+  "meetLink": "https://meet.google.com/new"
+}

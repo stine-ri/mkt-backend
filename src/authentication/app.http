@@ -1,0 +1,164 @@
+
+###
+POST http://localhost:3000/api/register
+Content-Type: application/json
+
+{
+
+  "full_name": "Christine Rian ",
+  "email": "riyan99@gmail.com",
+  "contact_phone": "0799087188",
+  "address": "90 kenya",
+  "role": "admin",
+  "password": "2003"
+}
+###
+###
+POST http://localhost:3000/api/register
+Content-Type: application/json
+
+{
+
+  "full_name": "Kim Smith ",
+  "email": "smith@example.com",
+  "contact_phone": "0789654321",
+  "address": "1950 Main St",
+  "role": "admin",
+  "password": "1999"
+}
+###
+
+POST http://localhost:3000/api/register
+Content-Type: application/json
+
+{
+  "full_name":"doreen smith",
+  "email": "doreen@example.com",
+  "contact_phone": "0788995544",
+  "address": "1950 Main ",
+  "role": "service_provider",
+  "password": "2000"
+}
+###
+POST http://localhost:3000/api/register
+Content-Type: application/json
+
+{
+
+  "full_name": "Cyrus Kimutai ",
+  "email": "Kmutai@gmail.com",
+  "contact_phone": "0734567231",
+  "address": "4 Kutus",
+  "role": "service_provider",
+  "password": "2001"
+}
+###
+###
+POST http://localhost:3000/api/register
+Content-Type: application/json
+
+{
+
+  "full_name": "Sadiki Kweyu ",
+  "email": "sadiki@gmail.com",
+  "contact_phone": "0734563172",
+  "address": "400 Kutus",
+  "role": "service_provider",
+  "password": "2034"
+}
+###
+###
+POST http://localhost:3000/api/register
+Content-Type: application/json
+
+{
+
+  "full_name": "Faith Peter ",
+  "email": "peter@gmail.com",
+  "contact_phone": "0772313456",
+  "address": "4 989 Kutus",
+  "role": "client",
+  "password": "2561"
+}
+###
+###
+POST http://localhost:3000/api/register
+Content-Type: application/json
+
+{
+
+  "full_name": "Ryan Kasire",
+  "email": "kasire@gmail.com",
+  "contact_phone": "0734786521",
+  "address": "609 Kutus",
+  "role": "client",
+  "password": "23451"
+}
+###
+###
+POST http://localhost:3000/api/register
+Content-Type: application/json
+
+{
+
+  "full_name": "Christopher Ontweka ",
+  "email": "ontweka45@gmail.com",
+  "contact_phone": "0789767231",
+  "address": "402 Kutus",
+  "role": "client",
+  "password": "24567#1"
+}
+###
+###
+POST http://localhost:3000/api/register
+Content-Type: application/json
+
+{
+
+  "full_name": "Christine Monyancha ",
+  "email": "Kimri99@gmail.com",
+  "contact_phone": "0734567231",
+  "address": "4 Kutus",
+  "role": "client",
+  "password": "2993"
+}
+###
+###
+POST http://localhost:3000/api/register
+Content-Type: application/json
+
+{
+
+   "full_name": "John Doe",
+   "email": "john@gmail.com",
+   "contact_phone": "+1-123-456-7890",
+   "address": "123 Main St, New York, NY 10001",
+   "role": "client",
+   "password": "2093"
+}
+###
+POST    http://localhost:3000/api/login
+Content-Type: application/json
+ 
+  {  
+    "email": "john@gmail.com",
+    "password": "2093"
+  }
+
+###
+POST    http://localhost:3000/api/login
+Content-Type: application/json
+ 
+  {  
+    "email": "riyan99@gmail.com",
+    "password": "2003"
+  }
+###
+POST http://localhost:3000/api/login
+Content-Type: application/json
+ 
+  {  
+    "email": "kmutai@gmail.com",
+    "password": "2001"
+  }
+
