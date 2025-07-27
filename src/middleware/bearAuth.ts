@@ -1,8 +1,8 @@
 import "dotenv/config";
 import { verify, sign } from "hono/jwt";
 import type { Context, Next } from "hono";
-import type { CustomContext } from "../types/context";
-import type { JwtPayload } from '../types/context';
+import type { CustomContext } from "../types/context.js";
+import type { JwtPayload } from '../types/context.js';
 
 export const verifyToken = async (token: string, secret: string) => {
     try {

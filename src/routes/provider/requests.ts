@@ -1,11 +1,11 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { db } from '../../drizzle/db';
-import { requests, providers, colleges, bids, notifications } from '../../drizzle/schema';
+import { db } from '../../drizzle/db.js';
+import { requests, providers, colleges, bids, notifications } from '../../drizzle/schema.js';
 import { eq, and, lte, gte, sql } from 'drizzle-orm';
-import {authMiddleware, serviceProviderRoleAuth  } from '../../middleware/bearAuth';
-import type { CustomContext } from '../../types/context';
-import { notifyNearbyProviders } from '../../lib/providerNotifications';
+import {authMiddleware, serviceProviderRoleAuth  } from '../../middleware/bearAuth.js';
+import type { CustomContext } from '../../types/context.js';
+import { notifyNearbyProviders } from '../../lib/providerNotifications.js';
 
 const app = new Hono<CustomContext>();
 

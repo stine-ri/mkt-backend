@@ -1,11 +1,11 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { db } from '../../drizzle/db';
-import { providers, providerServices } from '../../drizzle/schema';
+import { db } from '../../drizzle/db.js';
+import { providers, providerServices } from '../../drizzle/schema.js';
 import { eq, and } from 'drizzle-orm';
-import { authMiddleware, serviceProviderRoleAuth } from '../../middleware/bearAuth';
-import type { CustomContext } from '../../types/context';
-import type { Service } from '../../types/types'; 
+import { authMiddleware, serviceProviderRoleAuth } from '../../middleware/bearAuth.js';
+import type { CustomContext } from '../../types/context.js';
+import type { Service } from '../../types/types.js'; 
 
 const app = new Hono<CustomContext>();
 

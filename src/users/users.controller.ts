@@ -1,6 +1,6 @@
 
 import { Context } from "hono";
-import { usersService, getuserservice, createuserservice, updateuserservice, deleteuserservice,} from "./users.service";
+import { usersService, getuserservice, createuserservice, updateuserservice, deleteuserservice,} from "./users.service.js";
 import*as bcrypt from "bcrypt";
 export const listUsers = async (c: Context) => {
     try {

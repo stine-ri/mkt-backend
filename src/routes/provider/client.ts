@@ -2,7 +2,7 @@
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { and, eq, sql } from 'drizzle-orm';
-import { db } from '../../drizzle/db';
+import { db } from '../../drizzle/db.js';
 import { 
   requests, 
   bids, 

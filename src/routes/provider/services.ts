@@ -1,7 +1,7 @@
 // src/routes/serviceRoutes.ts
 import { Hono } from 'hono';
-import { db } from '../../drizzle/db';
-import { services } from '../../drizzle/schema';
+import { db } from '../../drizzle/db.js';
+import { services } from '../../drizzle/schema.js';
 
 const serviceRoutes = new Hono();
 

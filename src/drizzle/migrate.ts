@@ -1,5 +1,5 @@
 import { migrate } from "drizzle-orm/neon-http/migrator";
-import { db } from "./db";
+import { db } from "./db.js";
 
 // Fix __dirname in ESM
 import { fileURLToPath } from "url";

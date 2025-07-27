@@ -1,6 +1,6 @@
 // src/lib/notifications.ts
-import { db } from '../drizzle/db';
-import { notifications } from '../drizzle/schema';
+import { db } from '../drizzle/db.js';
+import { notifications } from '../drizzle/schema.js';
 import { WebSocket } from 'ws';
 
 const activeConnections = new Map<number, WebSocket>();

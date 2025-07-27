@@ -1,10 +1,10 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { listUsers, getUser, createUser, updateUser, deleteUser } from "./users.controller.js";
-import { usersSchema } from "./validator";
-import { adminRoleAuth } from "../middleware/bearAuth";
-import { db } from "../drizzle/db"; // Your Drizzle DB connection
-import { users } from "../drizzle/schema";
+import { usersSchema } from "./validator.js";
+import { adminRoleAuth } from "../middleware/bearAuth.js";
+import { db } from "../drizzle/db.js"; // Your Drizzle DB connection
+import { users } from "../drizzle/schema.js";
 import nodemailer from "nodemailer";
 import { eq } from "drizzle-orm";
 import dotenv from "dotenv";

@@ -1,5 +1,5 @@
-import  {Authentication, users,TIAuthentication, TIUsers  } from "../drizzle/schema";
-import db from "../drizzle/db";
+import  {Authentication, users,TIAuthentication, TIUsers  } from "../drizzle/schema.js";
+import db from "../drizzle/db.js";
 import { sql } from "drizzle-orm";
  
  

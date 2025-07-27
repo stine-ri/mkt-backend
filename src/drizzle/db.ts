@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { drizzle, NeonHttpDatabase } from "drizzle-orm/neon-http";
 import { neon } from "@neondatabase/serverless";
-import * as schema from './schema';
+import * as schema from './schema.js';
 
 
 const databaseUrl = process.env.Database_URL as string;

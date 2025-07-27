@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
-import { db } from '../../drizzle/db';
-import { colleges } from '../../drizzle/schema';
+import { db } from '../../drizzle/db.js';
+import { colleges } from '../../drizzle/schema.js';
 
 const app = new Hono();
 
