@@ -25,12 +25,16 @@ app.get('/', (c) => {
 
 app.use(
   cors({
-    origin: ['http://localhost:5173'], // no trailing slash!
+    origin: [
+      'http://localhost:5173',
+      'https://marketplace-frontend-delta-nine.vercel.app',
+    ],
     credentials: true,
     allowHeaders: ['Content-Type', 'Authorization'],
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   })
 );
+
 
 // const wss = new WebSocketServer({ server });
 
