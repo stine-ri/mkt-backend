@@ -6,6 +6,8 @@ import { eq, and } from 'drizzle-orm';
 import { authMiddleware, serviceProviderRoleAuth } from '../../middleware/bearAuth.js';
 import type { CustomContext } from '../../types/context.js';
 import type { Service } from '../../types/types.js'; 
+import { uploadFile } from '../../utils/filestorage.js'; 
+import { env } from 'hono/adapter';
 
 const app = new Hono<CustomContext>();
 
@@ -57,6 +59,39 @@ app.get('/', async (c: Context<CustomContext>) => {
     });
 });
 
+app.post('/upload', async (c) => {
+  try {
+    const jwtUser = c.get('user') as { id: string };
+    const userId = parseInt(jwtUser.id, 10);
+
+    const formData = await c.req.formData();
+    const file = formData.get('image') as File;
+
+    if (!file) {
+      return c.json({ error: 'No file uploaded' }, 400);
+    }
+
+    // Check file size (e.g., 2MB max)
+    if (file.size > 2 * 1024 * 1024) {
+      return c.json({ error: 'File size exceeds 2MB limit' }, 400);
+    }
+
+    // Check file type
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      return c.json({ error: 'Only JPEG, PNG, and WebP images are allowed' }, 400);
+    }
+
+    // Upload the file (implement this function based on your storage solution)
+    const fileUrl = await uploadFile(file, `providers/${userId}`, c);
+
+    return c.json({ url: fileUrl });
+  } catch (error) {
+    console.error('Error uploading file:', error);
+    return c.json({ error: 'Failed to upload file' }, 500);
+  }
+});
+
 // Create/Update provider profile
 app.put('/', async (c) => {
   try {
@@ -90,6 +125,7 @@ app.put('/', async (c) => {
           longitude: data.longitude,
           address: data.address,
           bio: data.bio,
+          profileImageUrl: data.profileImageUrl,
           isProfileComplete: true,
           updatedAt: new Date(),
         })

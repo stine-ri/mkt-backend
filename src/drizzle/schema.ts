@@ -62,6 +62,7 @@ export const providers = pgTable('providers', {
   isProfileComplete: boolean('is_profile_complete').default(false),
   rating: integer('rating'),
   completedRequests: integer('completed_requests').default(0),
+  profileImageUrl: varchar('profile_image_url', { length: 500 }),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
