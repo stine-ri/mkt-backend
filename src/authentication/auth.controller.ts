@@ -4,7 +4,7 @@ import  { Context } from "hono";
 import { createAuthUserService, userLoginService } from "./auth.service.js";
 import * as bycrpt from "bcrypt";
 import { sign } from "hono/jwt";
-import { users } from "../drizzle/schema";
+import { users } from "../drizzle/schema.js";
  import type { JwtPayload } from '../types/context.js';
 export const registerUser = async (c: Context) => {
     try {
