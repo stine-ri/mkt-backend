@@ -13,11 +13,8 @@ import clientRoutes from './routes/provider/client.js';
 import { db } from './drizzle/db.js';
 import { eq, and, or, gte, lte, inArray } from 'drizzle-orm';
 import * as schema from './drizzle/schema.js';
-
-import { WebSocketServer } from 'ws';
-import { verify } from 'hono/jwt';
-import { registerConnection } from './lib/notification.js';
-import { JwtPayload } from './types/context.js'; 
+import './websocket.js';
+ 
 const app = new Hono();
 
 app.get('/', (c) => {
@@ -35,38 +32,6 @@ app.use(
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   })
 );
-
-
-const wss = new WebSocketServer({ port: 8080 });
-
-wss.on('connection', (ws, req) => {
-  const token = new URL(req.url || '', 'http://localhost').searchParams.get('token');
-
-  if (!token) {
-    ws.close();
-    return;
-  }
-
-  const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    console.error('Missing JWT_SECRET');
-    ws.close();
-    return;
-  }
-
-  (async () => {
-    try {
-      const payload = await verify(token, secret) as JwtPayload;
-      registerConnection(Number(payload.id), ws);
-      ws.on('message', (message) => {
-        // Handle incoming messages if needed
-      });
-    } catch (error) {
-      console.error('WebSocket verification error:', error);
-      ws.close();
-    }
-  })();
-});
 
 
 

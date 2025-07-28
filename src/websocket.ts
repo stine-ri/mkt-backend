@@ -11,7 +11,7 @@ interface WebSocketUser {
   role: string;
 }
 
-const wss = new WebSocketServer({ port: 8080 });
+const wss = new WebSocketServer({ port: 8081 });
 
 
 wss.on('connection', (ws) => {
