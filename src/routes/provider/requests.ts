@@ -14,31 +14,64 @@ app.use('*', authMiddleware, serviceProviderRoleAuth);
 
 // Get relevant requests for provider
 app.get('/', async (c: Context<CustomContext>) => {
-  console.log('✅ Bid POST endpoint hit');
-  const userId = Number(c.get('user').id);
-  const { lat, lng, range = 50 } = c.req.query();
+  try {
+    console.log('=== Provider Requests Route Started ===');
+    
+    const userId = Number(c.get('user').id);
+    console.log('User ID:', userId);
+    
+    const { lat, lng, range = 50 } = c.req.query();
+    console.log('Query params:', { lat, lng, range });
+    
+    // Validate lat/lng if provided
+    if ((lat && !lng) || (!lat && lng)) {
+      console.error('Invalid coordinates: lat and lng must be provided together');
+      return c.json({ error: 'Both lat and lng are required for location filtering' }, 400);
+    }
 
-  // Get provider profile with services
-  const provider = await db.query.providers.findFirst({
-    where: eq(providers.userId, userId),
-    with: {
-      services: {
-        with: {
-          service: true,
+    // Get provider profile with services
+    console.log('Fetching provider profile for userId:', userId);
+    const provider = await db.query.providers.findFirst({
+      where: eq(providers.userId, userId),
+      with: {
+        services: {
+          with: {
+            service: true,
+          },
         },
       },
-    },
-  });
+    });
 
-  if (!provider) {
-    return c.json({ error: 'Provider profile not found' }, 404);
-  }
+    console.log('Provider found:', provider ? 'Yes' : 'No');
+    if (provider) {
+      console.log('Provider details:', {
+        id: provider.id,
+        collegeId: provider.collegeId,
+        servicesCount: provider.services?.length || 0
+      });
+    }
 
-  // Prepare serviceId list for IN clause
-  const serviceIds = provider.services.map((s) => s.serviceId);
+    if (!provider) {
+      console.log('Provider profile not found, returning 404');
+      return c.json({ error: 'Provider profile not found' }, 404);
+    }
 
-  // Raw SQL query using db.execute
-  const results = await db.execute(sql`
+    // Prepare serviceId list for IN clause
+    const serviceIds = provider.services.map((s) => s.serviceId);
+    console.log('Service IDs:', serviceIds);
+
+    // Log SQL parameters
+    console.log('SQL Query parameters:', {
+      lat: lat ? Number(lat) : null,
+      lng: lng ? Number(lng) : null,
+      range: Number(range),
+      serviceIds,
+      collegeId: provider.collegeId
+    });
+
+    // Raw SQL query using db.execute
+    console.log('Executing SQL query...');
+    const results = await db.execute(sql`
     SELECT 
       r.*, 
       u.email AS user_email, u.role AS user_role,
@@ -62,20 +95,58 @@ app.get('/', async (c: Context<CustomContext>) => {
               sin(radians(${lat}::float)) * 
               sin(radians((r.location::json->>'lat')::float))
             )
-          ) <= ${Number(range)}` : sql`TRUE`
-      })
-      AND (
-        ${serviceIds.length > 0 
-          ? sql`r.service_id IN (${sql.join(serviceIds.map(id => sql`${id}`), sql`,`)})`
-          : sql`TRUE`
-        }
+          ) <= ${Number(range)}
+        ` : sql`TRUE`}
       )
+      ${serviceIds.length > 0 
+        ? sql`AND r.service_id IN (${sql.join(serviceIds.map(id => sql`${id}`), sql`,`)})`
+        : sql``}
       AND (
         r.college_filter_id IS NULL OR r.college_filter_id = ${provider.collegeId}
       )
   `);
 
-  return c.json(results.rows); // Use .rows because db.execute returns { rows, ... }
+    console.log('SQL query executed successfully');
+    console.log('Results count:', results.rows?.length || 0);
+    
+    // Log first result for debugging (without sensitive data)
+    if (results.rows && results.rows.length > 0) {
+      const firstResult = results.rows[0];
+      console.log('First result sample:', {
+        id: firstResult.id,
+        service_id: firstResult.service_id,
+        status: firstResult.status,
+        has_location: !!firstResult.location,
+        service_name: firstResult.service_name
+      });
+    }
+
+    console.log('=== Provider Requests Route Completed Successfully ===');
+    return c.json(results.rows);
+
+  } catch (error) {
+  console.error('=== ERROR in Provider Requests Route ===');
+  if (error instanceof Error) {
+    console.error('Error type:', error.constructor.name);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+  } else {
+    console.error('Unknown error:', error);
+  }
+    
+    // Log additional context
+    console.error('Context at error:', {
+      userId: c.get('user')?.id,
+      query: c.req.query(),
+      timestamp: new Date().toISOString()
+    });
+    
+    return c.json({ 
+      error: 'Internal server error',
+      message: process.env.NODE_ENV === 'development' && error instanceof Error ? error.message : undefined
+
+    }, 500);
+  }
 });
 
 
