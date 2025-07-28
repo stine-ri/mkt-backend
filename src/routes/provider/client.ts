@@ -40,6 +40,58 @@ app.get('/requests', async (c) => {
   return c.json(clientRequests);
 });
 
+// POST /bids - client sends a bid to a provider
+// Add this to your bids route file
+app.post('/', async (c) => {
+  const clientId = Number(c.get('user').id);
+  const { providerId, requestId, price, message } = await c.req.json();
+
+  // Validate required fields
+  if (!providerId || !requestId || price === undefined) {
+    return c.json({ error: 'Missing required fields' }, 400);
+  }
+
+  try {
+    // Verify the request exists and belongs to the client
+    const request = await db.query.requests.findFirst({
+      where: and(
+        eq(requests.id, requestId),
+        eq(requests.userId, clientId)
+      ),
+    });
+
+    if (!request) {
+      return c.json({ error: 'Request not found or unauthorized' }, 404);
+    }
+
+    // Create the bid
+    const [newBid] = await db.insert(bids).values({
+      providerId: Number(providerId),
+      requestId: Number(requestId),
+      price: Number(price),
+      message: message || null,
+      status: 'pending',
+      isGraduateOfRequestedCollege: false, // Default value
+      createdAt: new Date()
+    }).returning();
+
+    // Send notification to provider
+    await db.insert(notifications).values({
+      userId: providerId,
+      type: 'new_bid',
+      message: `You have a new bid for request #${requestId}`,
+      isRead: false,
+      relatedEntityId: newBid.id,
+      createdAt: new Date()
+    });
+
+    return c.json(newBid, 201);
+  } catch (error) {
+    console.error('Error creating bid:', error);
+    return c.json({ error: 'Internal server error' }, 500);
+  }
+});
+
 // Get detailed bids for a specific request
 app.get('/requests/:id/bids', async (c) => {
   const userId = Number(c.get('user').id); // ✅ Convert string to number

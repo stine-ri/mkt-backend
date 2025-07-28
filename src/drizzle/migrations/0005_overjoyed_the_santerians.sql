@@ -1,0 +1,1 @@
+ALTER TABLE "bids" ALTER COLUMN "request_id" SET NOT NULL;

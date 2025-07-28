@@ -44,23 +44,23 @@ app.get('/', async (c: Context<CustomContext>) => {
     )) <= ${range}
   ` : sql`true`;
 
-  const relevantRequests = await db.query.requests.findMany({
+    const relevantRequests = await db.query.requests.findMany({
     where: and(
       eq(requests.status, 'open'),
       distanceFilter,
-      // Only requests for services the provider offers
       provider.services.length > 0 
         ? sql`${requests.serviceId} IN (${provider.services.map(s => s.serviceId)})`
         : sql`true`,
-      // College filter if specified
       sql`${requests.collegeFilterId} IS NULL OR ${requests.collegeFilterId} = ${provider.collegeId}`
     ),
     with: {
       user: true,
       service: true,
       college: true,
+      bids: true, // ✅ Include bids here
     },
   });
+
 
   return c.json(relevantRequests);
 });

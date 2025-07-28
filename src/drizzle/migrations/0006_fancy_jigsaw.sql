@@ -1,0 +1,2 @@
+ALTER TABLE "bids" ADD COLUMN "user_id" integer;--> statement-breakpoint
+ALTER TABLE "bids" ADD CONSTRAINT "bids_user_id_users_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("user_id") ON DELETE no action ON UPDATE no action;

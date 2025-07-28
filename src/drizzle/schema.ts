@@ -105,7 +105,8 @@ export const requests = pgTable('requests', {
 
 export const bids = pgTable('bids', {
   id: serial('id').primaryKey(),
-  requestId: integer('request_id').references(() => requests.id),
+  userId: integer('user_id').references(() => users.id),
+  requestId: integer('request_id').notNull().references(() => requests.id),
   providerId: integer('provider_id').references(() => providers.id),
   price: integer('price').notNull(),
   message: text('message'),
@@ -137,6 +138,7 @@ export const providerRelations = relations(providers, ({ many, one }) => ({
   bids: many(bids),
 }));
 
+
 export const requestRelations = relations(requests, ({ one }) => ({
   user: one(users, {
     fields: [requests.userId],
@@ -165,6 +167,7 @@ export const bidsRelations = relations(bids, ({ one }) => ({
     references: [providers.id],
   }),
 }));
+
 
 export const providerServiceRelations = relations(providerServices, ({ one }) => ({
   provider: one(providers, {
