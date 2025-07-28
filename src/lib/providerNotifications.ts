@@ -5,9 +5,9 @@ import {
   providers,
   bids,
   providerServices,
-} from '../drizzle/schema';
+} from '../drizzle/schema.js';
 import { and, eq, sql } from 'drizzle-orm';
-import { sendNotification } from './notification';
+import { sendNotification } from './notification.js';
 
 // Manually extend request type to include optional latitude and longitude
 export async function notifyNearbyProviders(
