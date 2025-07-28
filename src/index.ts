@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { userRouter } from './users/users.router.js';
 import { authRouter } from './authentication/auth.router.js';
+import { serveStatic } from 'hono/bun'; 
 import providerProfile from './routes/provider/profile.js';
 import providerRequests from './routes/provider/requests.js';
 import providerBids from './routes/provider/bids.js';
@@ -34,6 +35,11 @@ app.use(
 );
 
 
+// Serve static files from uploads directory
+app.use('/uploads/*', serveStatic({ 
+  root: './',
+  rewriteRequestPath: (path) => path.replace(/^\/uploads/, '') 
+}));
 
 // routes
 app.route('/api', userRouter);
