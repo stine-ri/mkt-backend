@@ -14,7 +14,8 @@ app.use('*', authMiddleware, serviceProviderRoleAuth);
 
 // Get relevant requests for provider
 app.get('/', async (c: Context<CustomContext>) => {
- const userId = Number(c.get('user').id);
+  console.log('✅ Bid POST endpoint hit');
+  const userId = Number(c.get('user').id);
   const { lat, lng, range = 50 } = c.req.query();
 
   // Get provider profile with services
@@ -33,37 +34,50 @@ app.get('/', async (c: Context<CustomContext>) => {
     return c.json({ error: 'Provider profile not found' }, 404);
   }
 
-  // Calculate distance if coordinates provided
-  const distanceFilter = lat && lng ? sql`
-    (6371 * acos(
-      cos(radians(${lat})) * 
-      cos(radians(${requests.location}::json->>'lat')) * 
-      cos(radians(${requests.location}::json->>'lng') - radians(${lng})) + 
-      sin(radians(${lat})) * 
-      sin(radians(${requests.location}::json->>'lat'))
-    )) <= ${range}
-  ` : sql`true`;
+  // Prepare serviceId list for IN clause
+  const serviceIds = provider.services.map((s) => s.serviceId);
 
-    const relevantRequests = await db.query.requests.findMany({
-    where: and(
-      eq(requests.status, 'open'),
-      distanceFilter,
-      provider.services.length > 0 
-        ? sql`${requests.serviceId} IN (${provider.services.map(s => s.serviceId)})`
-        : sql`true`,
-      sql`${requests.collegeFilterId} IS NULL OR ${requests.collegeFilterId} = ${provider.collegeId}`
-    ),
-    with: {
-      user: true,
-      service: true,
-      college: true,
-      bids: true, // ✅ Include bids here
-    },
-  });
+  // Raw SQL query using db.execute
+  const results = await db.execute(sql`
+    SELECT 
+      r.*, 
+      u.email AS user_email, u.role AS user_role,
+      s.name AS service_name,
+      c.name AS college_name,
+      (
+        SELECT json_agg(b.*) FROM bids b WHERE b.request_id = r.id
+      ) AS bids
+    FROM requests r
+    LEFT JOIN users u ON u.id = r.user_id
+    LEFT JOIN services s ON s.id = r.service_id
+    LEFT JOIN colleges c ON c.id = r.college_filter_id
+    WHERE r.status = 'open'
+      AND (
+        ${lat && lng ? sql`
+          (
+            6371 * acos(
+              cos(radians(${lat}::float)) * 
+              cos(radians((r.location::json->>'lat')::float)) * 
+              cos(radians((r.location::json->>'lng')::float) - radians(${lng}::float)) + 
+              sin(radians(${lat}::float)) * 
+              sin(radians((r.location::json->>'lat')::float))
+            )
+          ) <= ${Number(range)}` : sql`TRUE`
+      })
+      AND (
+        ${serviceIds.length > 0 
+          ? sql`r.service_id IN (${sql.join(serviceIds.map(id => sql`${id}`), sql`,`)})`
+          : sql`TRUE`
+        }
+      )
+      AND (
+        r.college_filter_id IS NULL OR r.college_filter_id = ${provider.collegeId}
+      )
+  `);
 
-
-  return c.json(relevantRequests);
+  return c.json(results.rows); // Use .rows because db.execute returns { rows, ... }
 });
+
 
 
 app.post('/', async (c) => {
