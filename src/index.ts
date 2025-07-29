@@ -11,6 +11,7 @@ import providerBids from './routes/provider/bids.js';
 import collegesRoute from './routes/provider/college.js';
 import serviceRoutes from './routes/provider/services.js';
 import clientRoutes from './routes/provider/client.js';
+import profileUploadHandler from './routes/provider/profile.js';
 import { db } from './drizzle/db.js';
 import { eq, and, or, gte, lte, inArray } from 'drizzle-orm';
 import * as schema from './drizzle/schema.js';
@@ -50,6 +51,7 @@ app.route('/api/provider/bids', providerBids);
 app.route('/api/colleges', collegesRoute);
 app.route('api/client', clientRoutes);
 app.route('/', serviceRoutes);
+app.route('/', profileUploadHandler);
 
 // Admin endpoints (existing)
 app.get('/api/services', async (c) => {
