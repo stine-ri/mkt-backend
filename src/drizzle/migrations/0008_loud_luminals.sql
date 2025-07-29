@@ -1,0 +1,1 @@
+ALTER TABLE "providers" DROP COLUMN "profile_image_url";

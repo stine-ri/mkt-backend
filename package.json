@@ -25,7 +25,7 @@
     "axios": "^1.8.3",
     "bcrypt": "^5.1.1",
     "dotenv": "^16.4.7",
-    "drizzle-orm": "^0.39.0",
+    "drizzle-orm": "^0.39.3",
     "hono": "^4.8.9",
     "hono-rate-limiter": "^0.4.2",
     "nodemailer": "^6.10.0",

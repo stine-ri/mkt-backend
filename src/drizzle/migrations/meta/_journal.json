@@ -50,6 +50,27 @@
       "when": 1753714175113,
       "tag": "0006_fancy_jigsaw",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1753814731956,
+      "tag": "0007_mature_chimera",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1753814824176,
+      "tag": "0008_loud_luminals",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1753814903721,
+      "tag": "0009_harsh_junta",
+      "breakpoints": true
     }
   ]
 }
