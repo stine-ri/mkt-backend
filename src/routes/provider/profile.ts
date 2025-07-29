@@ -332,4 +332,129 @@ app.get('/:id', async (c: Context<CustomContext>) => {
     }
 });
 
+// Then create public versions of the routes that skip authentication
+app.get('/public/all', (c, next) => next(), async (c: Context<CustomContext>) => {
+    // Copy the exact implementation from your /all route
+    try {
+        const { serviceId, collegeId, search } = c.req.query();
+
+        // Build conditions array
+        const conditions = [eq(providers.isProfileComplete, true)];
+
+        if (serviceId) {
+            conditions.push(eq(services.id, parseInt(serviceId)));
+        }
+        if (collegeId) {
+            conditions.push(eq(colleges.id, parseInt(collegeId)));
+        }
+        if (search) {
+            const searchCondition = or(
+                like(providers.firstName, `%${search}%`),
+                like(providers.lastName, `%${search}%`),
+                like(providers.bio, `%${search}%`)
+            );
+            if (searchCondition) {
+                conditions.push(searchCondition);
+            }
+        }
+
+        const results = await db.select()
+            .from(providers)
+            .leftJoin(providerServices, eq(providers.id, providerServices.providerId))
+            .leftJoin(services, eq(providerServices.serviceId, services.id))
+            .leftJoin(colleges, eq(providers.collegeId, colleges.id))
+            .where(and(...conditions.filter(Boolean)));
+
+        const providersMap = new Map<number, any>();
+        
+        results.forEach(row => {
+            const provider = row.providers;
+            const service = row.services;
+            const college = row.colleges;
+
+            if (!providersMap.has(provider.id)) {
+                providersMap.set(provider.id, {
+                    ...provider,
+                    college,
+                    services: service ? [service] : []
+                });
+            } else {
+                const existing = providersMap.get(provider.id);
+                if (service && !existing.services.some((s: any) => s.id === service.id)) {
+                    existing.services.push(service);
+                }
+            }
+        });
+
+        return c.json({
+            success: true,
+            data: Array.from(providersMap.values())
+        });
+
+    } catch (error) {
+        console.error('Error fetching providers:', error);
+        return c.json({ 
+            success: false,
+            error: 'Failed to fetch providers',
+            details: error instanceof Error ? error.message : String(error)
+        }, 500);
+    }
+});
+
+app.get('/public/:id', (c, next) => next(), async (c: Context<CustomContext>) => {
+    // Copy the exact implementation from your /:id route
+    try {
+        const providerId = parseInt(c.req.param('id'));
+
+        const provider = await db.query.providers.findFirst({
+            where: and(
+                eq(providers.id, providerId),
+                eq(providers.isProfileComplete, true)
+            ),
+            with: {
+                college: true,
+                services: {
+                    with: {
+                        service: true,
+                    },
+                },
+            },
+        });
+
+        if (!provider) {
+            return c.json({ 
+                success: false,
+                error: 'Provider not found or profile incomplete'
+            }, 404);
+        }
+
+        // Return only public-safe fields
+        return c.json({
+            success: true,
+            data: {
+                id: provider.id,
+                firstName: provider.firstName,
+                lastName: provider.lastName,
+                college: provider.college,
+                services: provider.services.map(ps => ps.service),
+                rating: provider.rating,
+                completedRequests: provider.completedRequests,
+                profileImageUrl: provider.profileImageUrl,
+                bio: provider.bio
+                // Exclude sensitive fields like:
+                // phoneNumber, address, exact coordinates, etc.
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching provider:', error);
+        return c.json({ 
+            success: false,
+            error: 'Failed to fetch provider',
+            details: error instanceof Error ? error.message : String(error)
+        }, 500);
+    }
+});
+
+
 export default app;
