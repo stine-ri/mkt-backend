@@ -4,7 +4,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { userRouter } from './users/users.router.js';
 import { authRouter } from './authentication/auth.router.js';
-import { serveStatic } from 'hono/bun'; 
+import { serveStatic } from '@hono/node-server/serve-static';
 import providerProfile from './routes/provider/profile.js';
 import providerRequests from './routes/provider/requests.js';
 import providerBids from './routes/provider/bids.js';

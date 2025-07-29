@@ -7,7 +7,7 @@ import { authMiddleware, serviceProviderRoleAuth } from '../../middleware/bearAu
 import type { CustomContext } from '../../types/context.js';
 import type { Service } from '../../types/types.js'; 
 import { uploadFile } from '../../utils/filestorage.js'; 
-import { serveStatic } from 'hono/bun';
+import { serveStatic } from '@hono/node-server/serve-static';
 import { env } from 'hono/adapter';
 
 const app = new Hono<CustomContext>();
