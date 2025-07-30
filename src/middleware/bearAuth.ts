@@ -15,17 +15,28 @@ export const verifyToken = async (token: string, secret: string) => {
 
 export const authMiddleware = async (c: Context<CustomContext>, next: Next) => {
   const publicRoutes = [
-    '/api/provider/public/all',
+    '/public/all',  // Fixed: Updated to match your actual route
     '/api/services',
     // Add more public route paths here
   ];
 
   const path = c.req.path;
-  const isPublic = publicRoutes.some(publicRoute => path.startsWith(publicRoute));
+  console.log('Auth middleware - checking path:', path); // Debug log
+  console.log('Public routes:', publicRoutes); // Debug log
+  
+  const isPublic = publicRoutes.some(publicRoute => {
+    const matches = path.startsWith(publicRoute);
+    console.log(`Checking if '${path}' starts with '${publicRoute}': ${matches}`); // Debug log
+    return matches;
+  });
+  
+  console.log('Is path public?:', isPublic); // Debug log
 
   const token = c.req.header("Authorization")?.split(" ")[1];
+  console.log('Token present:', !!token); // Debug log
 
   if (!token && !isPublic) {
+    console.log('No token and not public route - returning 401'); // Debug log
     return c.json({ error: "Token not provided" }, 401);
   }
 
@@ -34,6 +45,7 @@ export const authMiddleware = async (c: Context<CustomContext>, next: Next) => {
       const decoded = await verify(token, process.env.JWT_SECRET as string) as JwtPayload;
 
       if (!decoded || !decoded.id || !decoded.role) {
+        console.log('Invalid token payload - returning 401'); // Debug log
         return c.json({ error: "Invalid token payload" }, 401);
       }
 
@@ -42,20 +54,24 @@ export const authMiddleware = async (c: Context<CustomContext>, next: Next) => {
         email: decoded.email,
         role: decoded.role,
       });
+      console.log('Token verified successfully'); // Debug log
     } catch (error) {
+      console.log('Token verification failed:', error); // Debug log
       return c.json({ error: "Invalid or expired token" }, 401);
     }
   }
 
+  console.log('Auth middleware - proceeding to next()'); // Debug log
   await next();
 };
-
-
 
 export const roleMiddleware = (requiredRole: JwtPayload['role']) => {
     return async (c: Context<CustomContext>, next: Next) => {
         const user = c.get('user');
+        console.log(`Role middleware - required: ${requiredRole}, user role: ${user?.role}`); // Debug log
+        
         if (!user || user.role !== requiredRole) {
+            console.log('Role check failed - returning 403'); // Debug log
             return c.json({ error: "Unauthorized" }, 403);
         }
         await next();
