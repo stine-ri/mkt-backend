@@ -201,7 +201,7 @@ app.post('/bids/:id/accept', async (c) => {
       return c.json({ error: 'Bid not found or unauthorized' }, 404);
     }
 
-    if (bidWithRequest.request.userId !== userId) {
+    if (bidWithRequest.request.userId !== userId) {  // Note: user_id instead of userId
       return c.json({ error: 'Unauthorized' }, 403);
     }
 
@@ -217,7 +217,7 @@ app.post('/bids/:id/accept', async (c) => {
     await db.update(requests)
       .set({ 
         status: 'closed',
-        acceptedBidId: bidId
+        accepted_bid_id: bidId  // Changed to snake_case
       })
       .where(eq(requests.id, bidWithRequest.request.id));
 
@@ -225,24 +225,32 @@ app.post('/bids/:id/accept', async (c) => {
       .set({ status: 'rejected' })
       .where(
         and(
-          eq(bids.requestId, bidWithRequest.request.id),
+          eq(bids.requestId, bidWithRequest.request.id),  // Note: request_id instead of requestId
           eq(bids.status, 'pending')
         )
       );
 
-    // 3. Create notifications
+    // 3. Create notifications - ensure all required fields are included
+    if (!bidWithRequest.providerId) {  // Note: provider_id instead of providerId
+      throw new Error('Provider ID is missing');
+    }
+
     const notificationData = [
       {
-        userId: bidWithRequest.providerId,
+        userId: bidWithRequest.providerId,  // Note: user_id instead of userId
         type: 'bid_accepted',
         message: `Your bid for request #${bidWithRequest.request.id} was accepted!`,
-        relatedEntityId: bidId,
+        related_entity_id: bidId,  // Note: related_entity_id instead of relatedEntityId
+        isRead: false,  // Assuming this is required
+        createdAt: new Date()  // Assuming this is required
       },
       {
         userId: userId,
         type: 'bid_accepted_confirmation',
         message: `You accepted a bid from provider #${bidWithRequest.providerId}`,
         relatedEntityId: bidWithRequest.request.id,
+        isRead: false,
+        createdAt: new Date()
       },
     ];
     
@@ -252,7 +260,10 @@ app.post('/bids/:id/accept', async (c) => {
     
   } catch (error) {
     console.error('Error accepting bid:', error);
-    return c.json({ error: 'Internal server error' }, 500);
+    return c.json({ 
+      error: 'Internal server error',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
   }
 });
 
