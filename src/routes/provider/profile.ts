@@ -333,37 +333,15 @@ app.get('/:id', async (c: Context<CustomContext>) => {
 });
 
 // Then create public versions of the routes that skip authentication
-app.get('/public/all', (c, next) => next(), async (c: Context<CustomContext>) => {
-    // Copy the exact implementation from your /all route
+// Updated backend route
+app.get('/public/all', async (c: Context<CustomContext>) => {
     try {
-        const { serviceId, collegeId, search } = c.req.query();
-
-        // Build conditions array
-        const conditions = [eq(providers.isProfileComplete, true)];
-
-        if (serviceId) {
-            conditions.push(eq(services.id, parseInt(serviceId)));
-        }
-        if (collegeId) {
-            conditions.push(eq(colleges.id, parseInt(collegeId)));
-        }
-        if (search) {
-            const searchCondition = or(
-                like(providers.firstName, `%${search}%`),
-                like(providers.lastName, `%${search}%`),
-                like(providers.bio, `%${search}%`)
-            );
-            if (searchCondition) {
-                conditions.push(searchCondition);
-            }
-        }
-
         const results = await db.select()
             .from(providers)
             .leftJoin(providerServices, eq(providers.id, providerServices.providerId))
             .leftJoin(services, eq(providerServices.serviceId, services.id))
             .leftJoin(colleges, eq(providers.collegeId, colleges.id))
-            .where(and(...conditions.filter(Boolean)));
+            .where(eq(providers.isProfileComplete, true));
 
         const providersMap = new Map<number, any>();
         
@@ -375,8 +353,10 @@ app.get('/public/all', (c, next) => next(), async (c: Context<CustomContext>) =>
             if (!providersMap.has(provider.id)) {
                 providersMap.set(provider.id, {
                     ...provider,
-                    college,
-                    services: service ? [service] : []
+                    college: college || null,
+                    services: service ? [service] : [],
+                    rating: provider.rating || null,
+                    completedRequests: provider.completedRequests || 0
                 });
             } else {
                 const existing = providersMap.get(provider.id);
