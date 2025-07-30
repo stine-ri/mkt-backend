@@ -127,16 +127,23 @@ app.post('/:id/accept', async (c) => {
       return c.json({ error: 'Request is already closed' }, 400);
     }
 
-    // Start a transaction
-    const result = await db.transaction(async (tx) => {
-      // Update bid status to accepted
-      const [updatedBid] = await tx.update(bids)
-        .set({ status: 'accepted' })
-        .where(eq(bids.id, bidId))
-        .returning();
+    // Since transactions aren't supported, we'll do operations sequentially
+    // with error recovery if needed
 
-      // Update request status and set accepted_bid_id
-      const [updatedRequest] = await tx.update(requests)
+    // Step 1: Update bid status to accepted
+    const [updatedBid] = await db.update(bids)
+      .set({ status: 'accepted' })
+      .where(eq(bids.id, bidId))
+      .returning();
+
+    if (!updatedBid) {
+      return c.json({ error: 'Failed to update bid status' }, 500);
+    }
+
+    // Step 2: Update request status and set accepted_bid_id
+    let updatedRequest;
+    try {
+      [updatedRequest] = await db.update(requests)
         .set({ 
           status: 'closed',
           accepted_bid_id: bidId
@@ -144,53 +151,81 @@ app.post('/:id/accept', async (c) => {
         .where(eq(requests.id, bid.requestId))
         .returning();
 
-      // Reject all other pending bids for this request
-      await tx.update(bids)
+      if (!updatedRequest) {
+        // Rollback: revert bid status if request update failed
+        await db.update(bids)
+          .set({ status: 'pending' })
+          .where(eq(bids.id, bidId));
+        
+        return c.json({ error: 'Failed to update request status' }, 500);
+      }
+    } catch (requestUpdateError) {
+      // Rollback: revert bid status
+      await db.update(bids)
+        .set({ status: 'pending' })
+        .where(eq(bids.id, bidId));
+      
+      throw requestUpdateError;
+    }
+
+    // Step 3: Reject all other pending bids for this request
+    try {
+      await db.update(bids)
         .set({ status: 'rejected' })
         .where(
           and(
             eq(bids.requestId, bid.requestId),
             eq(bids.status, 'pending'),
-             ne(bids.id, bidId) // Exclude the accepted bid
+            ne(bids.id, bidId) // Exclude the accepted bid
           )
         );
-
-      return { updatedBid, updatedRequest };
-    });
+    } catch (rejectBidsError) {
+      console.warn('Warning: Failed to reject other bids, but main operation succeeded:', rejectBidsError);
+      // Don't fail the entire operation if this step fails
+      // The main bid acceptance is complete
+    }
 
     // Notifications
     const notificationPayload = {
       type: 'bid_accepted',
-      requestId: result.updatedRequest.id,
+      requestId: updatedRequest.id,
       bid: {
-        ...result.updatedBid,
+        ...updatedBid,
         provider: bid.provider // Include provider details
       },
-      request: result.updatedRequest
+      request: updatedRequest
     };
 
-    // Notify client (request owner)
-    if (result.updatedRequest.userId) {
-      sendRealTimeNotification(
-        Number(result.updatedRequest.userId),
-        notificationPayload
-      );
+    // Notify client (request owner) - don't fail if notifications fail
+    try {
+      if (updatedRequest.userId) {
+        sendRealTimeNotification(
+          Number(updatedRequest.userId),
+          notificationPayload
+        );
+      }
+    } catch (notificationError) {
+      console.warn('Warning: Failed to send notification to client:', notificationError);
     }
 
-    // Notify provider (bid owner)
-    if (result.updatedBid.providerId) {
-      sendRealTimeNotification(
-        Number(result.updatedBid.providerId),
-        {
-          ...notificationPayload,
-          type: 'your_bid_accepted'
-        }
-      );
+    // Notify provider (bid owner) - don't fail if notifications fail
+    try {
+      if (updatedBid.providerId) {
+        sendRealTimeNotification(
+          Number(updatedBid.providerId),
+          {
+            ...notificationPayload,
+            type: 'your_bid_accepted'
+          }
+        );
+      }
+    } catch (notificationError) {
+      console.warn('Warning: Failed to send notification to provider:', notificationError);
     }
 
     return c.json({
-      bid: result.updatedBid,
-      request: result.updatedRequest,
+      bid: updatedBid,
+      request: updatedRequest,
     });
 
   } catch (error) {
