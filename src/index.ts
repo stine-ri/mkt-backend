@@ -14,6 +14,7 @@ import clientRoutes from './routes/provider/client.js';
 import profileUploadHandler from './routes/provider/profile.js';
 import { authMiddleware } from './middleware/bearAuth.js';
 import { db } from './drizzle/db.js';
+import publicProviderRoutes from './routes/provider/publicProvider.js';
 import { eq, and, or, gte, lte, inArray } from 'drizzle-orm';
 import * as schema from './drizzle/schema.js';
 import './websocket.js';
@@ -175,7 +176,8 @@ app.route('/api/colleges', collegesRoute);
 app.route('/api/client', clientRoutes);  // Fixed: added leading slash
 app.route('/', serviceRoutes);
 app.route('/', profileUploadHandler);
-
+// Mount public provider routes
+app.route('/api/provider/public', publicProviderRoutes);
 // PROTECTED Admin endpoints (CREATE/UPDATE/DELETE operations)
 app.post('/api/services', async (c) => {
   console.log('Protected route: POST /api/services accessed');

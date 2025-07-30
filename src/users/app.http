@@ -6,7 +6,7 @@ Authorization:eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOnsiZnVsbF9uYW1lIjoiQ
 GET http://localhost:3000/api/users/1
 Authorization: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOnsiZnVsbF9uYW1lIjoiQ2hyaXN0aW5lIFJpYW4gIiwiY29udGFjdF9waG9uZSI6IjA3OTkwODcxODgiLCJhZGRyZXNzIjoiOTAga2VueWEiLCJpZCI6Nn0sInJvbGUiOiJhZG1pbiIsImV4cCI6MTczODE3MDI2NH0.fAIrnvN5CoQFxtORqHHxs9blFj_v3ADfQ5LNivr2An8
 ###
-
+GET http://localhost:3000/public/all
 ###
 POST http://localhost:3000/api/users
 Content-Type: application/json
@@ -40,3 +40,8 @@ Content-Type: application/json
   "bookingId": 29,
   "meetLink": "https://meet.google.com/new"
 }
+###
+curl http://localhost:3000/api/provider/public/all
+###
+###
+curl http://localhost:3000/api/provider/public/2
