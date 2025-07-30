@@ -2,7 +2,7 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { db } from '../../drizzle/db.js';
-import { providers, providerServices, services, colleges } from '../../drizzle/schema';
+import { providers, providerServices, services, colleges } from '../../drizzle/schema.js';
 import { eq, and } from 'drizzle-orm';
 import type { CustomContext } from '../../types/context.js';
 
