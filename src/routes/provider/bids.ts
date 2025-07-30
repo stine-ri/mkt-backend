@@ -105,8 +105,8 @@ app.post('/:id/accept', async (c) => {
     const bid = await db.query.bids.findFirst({
       where: eq(bids.id, bidId),
       with: {
-        provider: true, // Include provider info for notification
-        request: true   // Include request info
+        provider: true,
+        request: true
       }
     });
 
@@ -127,63 +127,31 @@ app.post('/:id/accept', async (c) => {
       return c.json({ error: 'Request is already closed' }, 400);
     }
 
-    // Since transactions aren't supported, we'll do operations sequentially
-    // with error recovery if needed
-
-    // Step 1: Update bid status to accepted
+    // Update bid status to accepted
     const [updatedBid] = await db.update(bids)
       .set({ status: 'accepted' })
       .where(eq(bids.id, bidId))
       .returning();
 
-    if (!updatedBid) {
-      return c.json({ error: 'Failed to update bid status' }, 500);
-    }
+    // Update request status and set accepted_bid_id
+    const [updatedRequest] = await db.update(requests)
+      .set({ 
+        status: 'closed',
+        accepted_bid_id: bidId
+      })
+      .where(eq(requests.id, bid.requestId))
+      .returning();
 
-    // Step 2: Update request status and set accepted_bid_id
-    let updatedRequest;
-    try {
-      [updatedRequest] = await db.update(requests)
-        .set({ 
-          status: 'closed',
-          accepted_bid_id: bidId
-        })
-        .where(eq(requests.id, bid.requestId))
-        .returning();
-
-      if (!updatedRequest) {
-        // Rollback: revert bid status if request update failed
-        await db.update(bids)
-          .set({ status: 'pending' })
-          .where(eq(bids.id, bidId));
-        
-        return c.json({ error: 'Failed to update request status' }, 500);
-      }
-    } catch (requestUpdateError) {
-      // Rollback: revert bid status
-      await db.update(bids)
-        .set({ status: 'pending' })
-        .where(eq(bids.id, bidId));
-      
-      throw requestUpdateError;
-    }
-
-    // Step 3: Reject all other pending bids for this request
-    try {
-      await db.update(bids)
-        .set({ status: 'rejected' })
-        .where(
-          and(
-            eq(bids.requestId, bid.requestId),
-            eq(bids.status, 'pending'),
-            ne(bids.id, bidId) // Exclude the accepted bid
-          )
-        );
-    } catch (rejectBidsError) {
-      console.warn('Warning: Failed to reject other bids, but main operation succeeded:', rejectBidsError);
-      // Don't fail the entire operation if this step fails
-      // The main bid acceptance is complete
-    }
+    // Reject all other pending bids for this request
+    await db.update(bids)
+      .set({ status: 'rejected' })
+      .where(
+        and(
+          eq(bids.requestId, bid.requestId),
+          eq(bids.status, 'pending'),
+          ne(bids.id, bidId) // Exclude the accepted bid
+        )
+      );
 
     // Notifications
     const notificationPayload = {
@@ -191,36 +159,28 @@ app.post('/:id/accept', async (c) => {
       requestId: updatedRequest.id,
       bid: {
         ...updatedBid,
-        provider: bid.provider // Include provider details
+        provider: bid.provider
       },
       request: updatedRequest
     };
 
-    // Notify client (request owner) - don't fail if notifications fail
-    try {
-      if (updatedRequest.userId) {
-        sendRealTimeNotification(
-          Number(updatedRequest.userId),
-          notificationPayload
-        );
-      }
-    } catch (notificationError) {
-      console.warn('Warning: Failed to send notification to client:', notificationError);
+    // Notify client (request owner)
+    if (updatedRequest.userId) {
+      sendRealTimeNotification(
+        Number(updatedRequest.userId),
+        notificationPayload
+      );
     }
 
-    // Notify provider (bid owner) - don't fail if notifications fail
-    try {
-      if (updatedBid.providerId) {
-        sendRealTimeNotification(
-          Number(updatedBid.providerId),
-          {
-            ...notificationPayload,
-            type: 'your_bid_accepted'
-          }
-        );
-      }
-    } catch (notificationError) {
-      console.warn('Warning: Failed to send notification to provider:', notificationError);
+    // Notify provider (bid owner)
+    if (updatedBid.providerId) {
+      sendRealTimeNotification(
+        Number(updatedBid.providerId),
+        {
+          ...notificationPayload,
+          type: 'your_bid_accepted'
+        }
+      );
     }
 
     return c.json({
@@ -230,13 +190,20 @@ app.post('/:id/accept', async (c) => {
 
   } catch (error) {
     console.error('Error accepting bid:', error);
+    
+    // Attempt to revert any changes if possible
+    try {
+      // You could add logic here to revert changes if needed
+    } catch (revertError) {
+      console.error('Error reverting changes:', revertError);
+    }
+    
     return c.json({ 
       error: 'Internal server error',
       details: error instanceof Error ? error.message : 'Unknown error'
     }, 500);
   }
 });
-
 // getting a service provider bids
 app.get('/bids', async (c) => {
   const providerId = Number(c.get('user').id);
