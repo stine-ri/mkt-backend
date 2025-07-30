@@ -19,6 +19,8 @@ export const authMiddleware = async (c: Context<CustomContext>, next: Next) => {
     '/public/',  // This will match /public/:id routes
     '/api/services',
     '/api/colleges',
+    '/api/login',
+   '/api/register',
     '/health',  // Health check route
     // Add more public route paths here
   ];
