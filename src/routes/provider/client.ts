@@ -1,44 +1,88 @@
 // src/routes/client.ts
 import { Hono } from 'hono';
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { and, eq, sql } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
+import { InferSelectModel } from 'drizzle-orm';
 import { db } from '../../drizzle/db.js';
-import { 
-  requests, 
-  bids, 
+import { drizzle } from 'drizzle-orm/node-postgres';
+
+import {
+  requests,
+  bids,
+  services,
+  colleges,
   notifications, 
-  providers,
-  providerServices,
-  users
 } from '../../drizzle/schema.js';
+
 import { authMiddleware, clientRoleAuth } from '../../middleware/bearAuth.js';
 
 const app = new Hono()
   .use('*', authMiddleware)
   .use('*', clientRoleAuth);
 
-// Get client's requests with bids count
+// Infer models
+type Request = InferSelectModel<typeof requests>;
+type Service = InferSelectModel<typeof services>;
+type College = InferSelectModel<typeof colleges>;
+type Bid = InferSelectModel<typeof bids>;
+
+type RequestWithRelations = Request & {
+  service?: Service;
+  college?: College;
+  bids?: Bid[];
+};
+
 app.get('/requests', async (c) => {
   const user = c.get('user');
-  const userId = Number(user.id); // ✅ convert to number
+  const userId = Number(user.id);
 
   if (isNaN(userId)) {
     return c.json({ error: 'Invalid user ID' }, 400);
   }
 
-  const clientRequests = await db
-    .select({
-      request: requests,
-      bidsCount: sql<number>`COUNT(${bids.id})`,
-    })
-    .from(requests)
-    .leftJoin(bids, eq(requests.id, bids.requestId))
-    .where(eq(requests.userId, userId)) // ✅ now userId is a number
-    .groupBy(requests.id)
-    .orderBy(requests.createdAt);
+  const clientRequests: RequestWithRelations[] = await db.query.requests.findMany({
+    where: eq(requests.userId, userId),
+    with: {
+      service: true,
+      college: true,
+      bids: true,
+    },
+    orderBy: (requests, { desc }) => [desc(requests.createdAt)],
+  });
 
-  return c.json(clientRequests);
+  const formatted = clientRequests.map((r) => ({
+    id: r.id,
+    userId: r.userId,
+    serviceId: r.serviceId,
+    productName: r.productName,
+    isService: r.isService,
+    description: r.description,
+    desiredPrice: r.desiredPrice,
+    budget: r.desiredPrice,
+    title: r.productName || r.service?.name || '',
+    category: r.service?.category || '',
+    location: typeof r.location === 'string' ? r.location : JSON.stringify(r.location),
+    latitude: null,
+    longitude: null,
+    serviceName: r.service?.name || '',
+    subcategory: null,
+    urgency: null,
+    preferredTime: null,
+    specialRequirements: null,
+    notes: null,
+    collegeFilterId: r.collegeFilterId,
+    college: r.college ? {
+      id: r.college.id,
+      name: r.college.name,
+    } : null,
+    status: r.status,
+    created_at: r.createdAt,
+    bids: r.bids ?? [],
+  }));
+
+  return c.json(formatted);
 });
+
+
 
 // POST /bids - client sends a bid to a provider
 // Add this to your bids route file

@@ -44,4 +44,13 @@ Content-Type: application/json
 curl http://localhost:3000/api/provider/public/all
 ###
 ###
-curl http://localhost:3000/api/provider/public/2
+curl http://localhost:3000/api/provider/public/1
+###
+curl -X GET http://localhost:3000/api/provider/requests \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjgiLCJlbWFpbCI6ImttdXRhaUBnbWFpbC5jb20iLCJyb2xlIjoic2VydmljZV9wcm92aWRlciJ9.X_DH-T8rmr_HZRCQwYEnstblZohcY-Tc7M5b2DtatdM"
+###
+curl http://localhost:3000/api/client/requests \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjgiLCJlbWFpbCI6ImttdXRhaUBnbWFpbC5jb20iLCJyb2xlIjoic2VydmljZV9wcm92aWRlciJ9.X_DH-T8rmr_HZRCQwYEnstblZohcY-Tc7M5b2DtatdM"
+###
+curl -X GET http://localhost:3000/api/client/requests \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjExIiwiZW1haWwiOiJjeXJ1c0BnbWFpbC5jb20iLCJyb2xlIjoiY2xpZW50In0.31XRm1RFUJjTO-mVc7MQckp0iTXDAHr8RttABr3FGqk"
