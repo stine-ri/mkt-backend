@@ -12,6 +12,7 @@ import collegesRoute from './routes/provider/college.js';
 import serviceRoutes from './routes/provider/services.js';
 import clientRoutes from './routes/provider/client.js';
 import profileUploadHandler from './routes/provider/profile.js';
+import { authMiddleware } from './middleware/bearAuth.js';
 import { db } from './drizzle/db.js';
 import { eq, and, or, gte, lte, inArray } from 'drizzle-orm';
 import * as schema from './drizzle/schema.js';
@@ -19,9 +20,6 @@ import './websocket.js';
  
 const app = new Hono();
 
-app.get('/', (c) => {
-  return c.text('Hello Hono!');
-});
 
 app.use(
   cors({
@@ -41,6 +39,123 @@ app.use('/uploads/*', serveStatic({
   root: './',
   rewriteRequestPath: (path) => path.replace(/^\/uploads/, '') 
 }));
+// PUBLIC ROUTES (before auth middleware)
+app.get('/', (c) => {
+  return c.text('Hello Hono!');
+});
+
+app.get('/health', (c) => c.json({ status: 'ok' }));
+
+// Public provider routes
+app.get('/public/all', async (c) => {
+  try {
+    const results = await db.select()
+      .from(schema.providers)
+      .leftJoin(schema.providerServices, eq(schema.providers.id, schema.providerServices.providerId))
+      .leftJoin(schema.services, eq(schema.providerServices.serviceId, schema.services.id))
+      .leftJoin(schema.colleges, eq(schema.providers.collegeId, schema.colleges.id))
+      .where(eq(schema.providers.isProfileComplete, true));
+
+    const providersMap = new Map<number, any>();
+    
+    results.forEach(row => {
+      const provider = row.providers;
+      const service = row.services;
+      const college = row.colleges;
+
+      if (!providersMap.has(provider.id)) {
+        providersMap.set(provider.id, {
+          ...provider,
+          college: college || null,
+          services: service ? [service] : [],
+          rating: provider.rating || null,
+          completedRequests: provider.completedRequests || 0
+        });
+      } else {
+        const existing = providersMap.get(provider.id);
+        if (service && !existing.services.some((s: any) => s.id === service.id)) {
+          existing.services.push(service);
+        }
+      }
+    });
+
+    return c.json({
+      success: true,
+      data: Array.from(providersMap.values())
+    });
+  } catch (error) {
+    console.error('Error fetching providers:', error);
+    return c.json({
+      success: false,
+      error: 'Failed to fetch providers',
+      details: error instanceof Error ? error.message : String(error)
+    }, 500);
+  }
+});
+
+app.get('/public/:id', async (c) => {
+  try {
+    const providerId = parseInt(c.req.param('id'));
+
+    const provider = await db.query.providers.findFirst({
+      where: and(
+        eq(schema.providers.id, providerId),
+        eq(schema.providers.isProfileComplete, true)
+      ),
+      with: {
+        college: true,
+        services: {
+          with: {
+            service: true,
+          },
+        },
+      },
+    });
+
+    if (!provider) {
+      return c.json({
+        success: false,
+        error: 'Provider not found or profile incomplete'
+      }, 404);
+    }
+
+    return c.json({
+      success: true,
+      data: {
+        id: provider.id,
+        firstName: provider.firstName,
+        lastName: provider.lastName,
+        college: provider.college,
+        services: provider.services.map(ps => ps.service),
+        rating: provider.rating,
+        completedRequests: provider.completedRequests,
+        profileImageUrl: provider.profileImageUrl,
+        bio: provider.bio
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching provider:', error);
+    return c.json({
+      success: false,
+      error: 'Failed to fetch provider',
+      details: error instanceof Error ? error.message : String(error)
+    }, 500);
+  }
+});
+
+// Public admin endpoints
+app.get('/api/services', async (c) => {
+  const services = await db.query.services.findMany();
+  return c.json(services);
+});
+
+app.get('/api/colleges', async (c) => {
+  const colleges = await db.query.colleges.findMany();
+  return c.json(colleges);
+});
+
+// Apply auth middleware globally (with public route exclusions)
+app.use('*', authMiddleware);
 
 // routes
 app.route('/api', userRouter);
