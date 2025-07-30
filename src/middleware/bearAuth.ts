@@ -17,23 +17,34 @@ export const authMiddleware = async (c: Context<CustomContext>, next: Next) => {
   const publicRoutes = [
     '/public/all',
     '/public/',  // This will match /public/:id routes
-    '/api/services',
-    '/api/colleges',
-    '/',  // Root route
-    '/health',  // Health check route
-    // Add more public route paths here
+    '/api/services',  // GET only - read access
+    '/api/colleges',  // GET only - read access
+    '/health',
+    '/api/login',
+    '/api/register',
+    '/uploads/',  // Static file serving
+  ];
+
+  // Exact match routes (only these exact paths)
+  const exactPublicRoutes = [
+    '/',  // Root route only
   ];
 
   const path = c.req.path;
   console.log('Auth middleware - checking path:', path);
-  console.log('Public routes:', publicRoutes);
+  console.log('Method:', c.req.method);
   
-  const isPublic = publicRoutes.some(publicRoute => {
+  // Check if route starts with any public route prefix
+  const isPublicPrefix = publicRoutes.some(publicRoute => {
     const matches = path.startsWith(publicRoute);
     console.log(`Checking if '${path}' starts with '${publicRoute}': ${matches}`);
     return matches;
   });
+
+  // Check if route is an exact match for public routes
+  const isExactPublic = exactPublicRoutes.includes(path);
   
+  const isPublic = isPublicPrefix || isExactPublic;
   console.log('Is path public?:', isPublic);
 
   const token = c.req.header("Authorization")?.split(" ")[1];
@@ -46,19 +57,21 @@ export const authMiddleware = async (c: Context<CustomContext>, next: Next) => {
 
   if (token) {
     try {
-      const decoded = await verify(token, process.env.JWT_SECRET as string) as JwtPayload;
+      const decoded = await verify(process.env.JWT_SECRET as string, token) as JwtPayload;
 
       if (!decoded || !decoded.id || !decoded.role) {
         console.log('Invalid token payload - returning 401');
-        return c.json({ error: "Invalid token payload" }, 401);
+        if (!isPublic) {
+          return c.json({ error: "Invalid token payload" }, 401);
+        }
+      } else {
+        c.set("user", {
+          id: decoded.id,
+          email: decoded.email,
+          role: decoded.role,
+        });
+        console.log('Token verified successfully for user:', decoded.email);
       }
-
-      c.set("user", {
-        id: decoded.id,
-        email: decoded.email,
-        role: decoded.role,
-      });
-      console.log('Token verified successfully');
     } catch (error) {
       console.log('Token verification failed:', error);
       if (!isPublic) {

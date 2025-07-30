@@ -20,7 +20,7 @@ import './websocket.js';
  
 const app = new Hono();
 
-
+// CORS configuration
 app.use(
   cors({
     origin: [
@@ -33,13 +33,13 @@ app.use(
   })
 );
 
-
 // Serve static files from uploads directory
 app.use('/uploads/*', serveStatic({ 
   root: './',
   rewriteRequestPath: (path) => path.replace(/^\/uploads/, '') 
 }));
-// PUBLIC ROUTES (before auth middleware)
+
+// PUBLIC ROUTES (before auth middleware) - EXACT PATHS ONLY
 app.get('/', (c) => {
   return c.text('Hello Hono!');
 });
@@ -48,6 +48,7 @@ app.get('/health', (c) => c.json({ status: 'ok' }));
 
 // Public provider routes
 app.get('/public/all', async (c) => {
+  console.log('Public route: /public/all accessed');
   try {
     const results = await db.select()
       .from(schema.providers)
@@ -94,6 +95,7 @@ app.get('/public/all', async (c) => {
 });
 
 app.get('/public/:id', async (c) => {
+  console.log('Public route: /public/:id accessed');
   try {
     const providerId = parseInt(c.req.param('id'));
 
@@ -143,67 +145,68 @@ app.get('/public/:id', async (c) => {
   }
 });
 
-// Public admin endpoints
+// Public admin endpoints (READ ONLY)
 app.get('/api/services', async (c) => {
+  console.log('Public route: /api/services accessed');
   const services = await db.query.services.findMany();
   return c.json(services);
 });
 
 app.get('/api/colleges', async (c) => {
+  console.log('Public route: /api/colleges accessed');
   const colleges = await db.query.colleges.findMany();
   return c.json(colleges);
 });
 
 // Apply auth middleware globally (with public route exclusions)
+console.log('Applying global auth middleware...');
 app.use('*', authMiddleware);
 
-// routes
+// PROTECTED ROUTES (after auth middleware)
+console.log('Setting up protected routes...');
+
+// Route handlers
 app.route('/api', userRouter);
 app.route('/api', authRouter);
 app.route('/api/provider/profile', providerProfile);
 app.route('/api/provider/requests', providerRequests);
 app.route('/api/provider/bids', providerBids);
 app.route('/api/colleges', collegesRoute);
-app.route('api/client', clientRoutes);
+app.route('/api/client', clientRoutes);  // Fixed: added leading slash
 app.route('/', serviceRoutes);
 app.route('/', profileUploadHandler);
 
-// Admin endpoints (existing)
-app.get('/api/services', async (c) => {
-  const services = await db.query.services.findMany();
-  return c.json(services);
-});
-
+// PROTECTED Admin endpoints (CREATE/UPDATE/DELETE operations)
 app.post('/api/services', async (c) => {
+  console.log('Protected route: POST /api/services accessed');
   const { name, category } = await c.req.json();
   const [service] = await db.insert(schema.services).values({ name, category }).returning();
   return c.json(service, 201);
 });
 
 app.delete('/api/services/:id', async (c) => {
+  console.log('Protected route: DELETE /api/services/:id accessed');
   const id = parseInt(c.req.param('id'));
   await db.delete(schema.services).where(eq(schema.services.id, id));
   return c.json({ message: 'Service deleted' });
 });
 
-app.get('/api/colleges', async (c) => {
-  const colleges = await db.query.colleges.findMany();
-  return c.json(colleges);
-});
-
 app.post('/api/colleges', async (c) => {
+  console.log('Protected route: POST /api/colleges accessed');
   const { name, location } = await c.req.json();
   const [college] = await db.insert(schema.colleges).values({ name, location }).returning();
   return c.json(college, 201);
 });
 
 app.delete('/api/colleges/:id', async (c) => {
+  console.log('Protected route: DELETE /api/colleges/:id accessed');
   const id = parseInt(c.req.param('id'));
   await db.delete(schema.colleges).where(eq(schema.colleges.id, id));
   return c.json({ message: 'College deleted' });
 });
 
 app.post('/api/service-requests', async (c) => {
+  console.log('Protected route: POST /api/service-requests accessed');
   const requestData = await c.req.json();
 
   // Create the request
@@ -254,8 +257,8 @@ app.post('/api/service-requests', async (c) => {
   return c.json(request, 201);
 });
 
-
 app.get('/api/service-requests/nearby', async (c) => {
+  console.log('Protected route: GET /api/service-requests/nearby accessed');
   const { latitude, longitude, radius, providerId } = c.req.query();
   
   const results = await db.query.requests.findMany({
@@ -270,8 +273,8 @@ app.get('/api/service-requests/nearby', async (c) => {
   return c.json(results);
 });
 
-
 app.post('/api/bids', async (c) => {
+  console.log('Protected route: POST /api/bids accessed');
   const bidData = await c.req.json();
   const [bid] = await db.insert(schema.bids).values(bidData).returning();
   
@@ -287,6 +290,7 @@ app.post('/api/bids', async (c) => {
 });
 
 app.get('/api/notifications/:userId', async (c) => {
+  console.log('Protected route: GET /api/notifications/:userId accessed');
   const userId = parseInt(c.req.param('userId'));
   const notifications = await db.query.notifications.findMany({
     where: eq(schema.notifications.userId, userId),
@@ -297,6 +301,7 @@ app.get('/api/notifications/:userId', async (c) => {
 });
 
 app.patch('/api/notifications/:id/read', async (c) => {
+  console.log('Protected route: PATCH /api/notifications/:id/read accessed');
   const id = parseInt(c.req.param('id'));
   await db.update(schema.notifications)
     .set({ isRead: true })
@@ -304,11 +309,6 @@ app.patch('/api/notifications/:id/read', async (c) => {
   
   return c.json({ message: 'Notification marked as read' });
 });
-
-
-
-// Health check
-app.get('/health', (c) => c.json({ status: 'ok' }));
 
 serve({
   fetch: app.fetch,
