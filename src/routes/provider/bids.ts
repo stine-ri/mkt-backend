@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { db } from '../../drizzle/db.js';
 import { bids, requests, providers , users} from '../../drizzle/schema.js';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, ne } from 'drizzle-orm';
 import { authMiddleware, serviceProviderRoleAuth } from '../../middleware/bearAuth.js';
 import type { CustomContext } from '../../types/context.js';
 import { sendRealTimeNotification } from '../../websocket.js';
@@ -94,55 +94,113 @@ sendRealTimeNotification(Number(request.userId), wsMessage);
 
   return c.json(bid, 201);
 });
+
 // Add to your bids route file
 app.post('/:id/accept', async (c) => {
   const bidId = Number(c.req.param('id'));
+  const userId = Number(c.get('user').id);
 
   try {
-    // Update bid status
-    const [updatedBid] = await db.update(bids)
-      .set({ status: 'accepted' })
-      .where(eq(bids.id, bidId))
-      .returning();
+    // First get the bid to find its associated request and provider
+    const bid = await db.query.bids.findFirst({
+      where: eq(bids.id, bidId),
+      with: {
+        provider: true, // Include provider info for notification
+        request: true   // Include request info
+      }
+    });
 
-    if (!updatedBid) {
+    if (!bid) {
       return c.json({ error: 'Bid not found' }, 404);
     }
 
-    // Update request status and get the updated request
-    const [updatedRequest] = await db.update(requests)
-      .set({ status: 'closed' })
-      .where(eq(requests.id, updatedBid.requestId))
-      .returning();
-
-    if (!updatedRequest) {
-      return c.json({ error: 'Request not found' }, 404);
+    // Verify the request exists and belongs to this user
+    if (!bid.request || bid.request.userId !== userId) {
+      return c.json({ error: 'Request not found or unauthorized' }, 404);
     }
 
-    // Notify the client (owner of the request)
-    sendRealTimeNotification(Number(updatedRequest.userId), {
-      type: 'bid_accepted',
-      requestId: updatedRequest.id,
-      bid: updatedBid,
+    if (bid.status !== 'pending') {
+      return c.json({ error: 'Bid is not in a pending state' }, 400);
+    }
+
+    if (bid.request.status === 'closed') {
+      return c.json({ error: 'Request is already closed' }, 400);
+    }
+
+    // Start a transaction
+    const result = await db.transaction(async (tx) => {
+      // Update bid status to accepted
+      const [updatedBid] = await tx.update(bids)
+        .set({ status: 'accepted' })
+        .where(eq(bids.id, bidId))
+        .returning();
+
+      // Update request status and set accepted_bid_id
+      const [updatedRequest] = await tx.update(requests)
+        .set({ 
+          status: 'closed',
+          accepted_bid_id: bidId
+        })
+        .where(eq(requests.id, bid.requestId))
+        .returning();
+
+      // Reject all other pending bids for this request
+      await tx.update(bids)
+        .set({ status: 'rejected' })
+        .where(
+          and(
+            eq(bids.requestId, bid.requestId),
+            eq(bids.status, 'pending'),
+             ne(bids.id, bidId) // Exclude the accepted bid
+          )
+        );
+
+      return { updatedBid, updatedRequest };
     });
 
-    // Notify the provider (owner of the accepted bid)
-    sendRealTimeNotification(Number(updatedBid.providerId), {
-      type: 'your_bid_accepted',
-      requestId: updatedRequest.id,
-      bid: updatedBid,
-    });
+    // Notifications
+    const notificationPayload = {
+      type: 'bid_accepted',
+      requestId: result.updatedRequest.id,
+      bid: {
+        ...result.updatedBid,
+        provider: bid.provider // Include provider details
+      },
+      request: result.updatedRequest
+    };
+
+    // Notify client (request owner)
+    if (result.updatedRequest.userId) {
+      sendRealTimeNotification(
+        Number(result.updatedRequest.userId),
+        notificationPayload
+      );
+    }
+
+    // Notify provider (bid owner)
+    if (result.updatedBid.providerId) {
+      sendRealTimeNotification(
+        Number(result.updatedBid.providerId),
+        {
+          ...notificationPayload,
+          type: 'your_bid_accepted'
+        }
+      );
+    }
 
     return c.json({
-      bid: updatedBid,
-      request: updatedRequest,
+      bid: result.updatedBid,
+      request: result.updatedRequest,
     });
+
   } catch (error) {
     console.error('Error accepting bid:', error);
-    return c.json({ error: 'Internal server error' }, 500);
+    return c.json({ 
+      error: 'Internal server error',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
   }
 });
-
 
 // getting a service provider bids
 app.get('/bids', async (c) => {

@@ -41,13 +41,22 @@ export const Authentication = pgTable("authentication", {
     created_at: timestamp("created_at").defaultNow(),
     updated_at: timestamp("updated_at").defaultNow(),
 });
- 
-export const authenticationRelations = relations(Authentication, ({ one }) => ({
-    user: one(users, {
-        fields: [Authentication.user_id],
-        references: [users.id],
-    }),
-}));
+
+export const colleges = pgTable('colleges', {
+  id: serial('id').primaryKey(),
+  name: varchar('name', { length: 255 }).notNull(),
+  location: varchar('location', { length: 255 }),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const services = pgTable('services', {
+  id: serial('id').primaryKey(),
+  name: varchar('name', { length: 255 }).notNull(),
+  category: varchar('category', { length: 100 }),
+  description: text('description'),
+   createdAt: timestamp('created_at').defaultNow(),
+});
+
 export const providers = pgTable('providers', {
   id: serial('id').primaryKey(),
   userId: integer('user_id').notNull().references(() => users.id),
@@ -74,22 +83,7 @@ export const providerServices = pgTable('provider_services', {
   pk: primaryKey(t.providerId, t.serviceId),
 }));
 
-
-export const colleges = pgTable('colleges', {
-  id: serial('id').primaryKey(),
-  name: varchar('name', { length: 255 }).notNull(),
-  location: varchar('location', { length: 255 }),
-  createdAt: timestamp('created_at').defaultNow(),
-});
-
-export const services = pgTable('services', {
-  id: serial('id').primaryKey(),
-  name: varchar('name', { length: 255 }).notNull(),
-  category: varchar('category', { length: 100 }),
-  description: text('description'),
-   createdAt: timestamp('created_at').defaultNow(),
-});
-
+// Requests table - defined without circular reference first
 export const requests = pgTable('requests', {
   id: serial('id').primaryKey(),
   userId: integer('user_id').references(() => users.id),
@@ -101,9 +95,14 @@ export const requests = pgTable('requests', {
   location: varchar('location', { length: 255 }).notNull(),
   collegeFilterId: integer('college_filter_id').references(() => colleges.id),
   status: varchar('status', { enum: ['open', 'closed', 'pending'] }).default('open'),
+  
+  // Store accepted bid ID without foreign key constraint to avoid circular dependency
+  accepted_bid_id: integer('accepted_bid_id'),
+  
   createdAt: timestamp('created_at').defaultNow(),
 });
 
+// Bids table
 export const bids = pgTable('bids', {
   id: serial('id').primaryKey(),
   userId: integer('user_id').references(() => users.id),
@@ -115,6 +114,7 @@ export const bids = pgTable('bids', {
   status: varchar('status', { enum: ['pending', 'accepted', 'rejected'] }).default('pending'),
   createdAt: timestamp('created_at').defaultNow(),
 });
+
 export const notifications = pgTable('notifications', {
   id: serial('id').primaryKey(),
   userId: integer('user_id').notNull(),
@@ -125,7 +125,21 @@ export const notifications = pgTable('notifications', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
-// Define relations
+// Define all relations
+export const authenticationRelations = relations(Authentication, ({ one }) => ({
+    user: one(users, {
+        fields: [Authentication.user_id],
+        references: [users.id],
+    }),
+}));
+
+export const userRelations = relations(users, ({ many }) => ({
+  authentication: many(Authentication),
+  providers: many(providers),
+  requests: many(requests),
+  bids: many(bids),
+}));
+
 export const providerRelations = relations(providers, ({ many, one }) => ({
   user: one(users, {
     fields: [providers.userId],
@@ -139,8 +153,28 @@ export const providerRelations = relations(providers, ({ many, one }) => ({
   bids: many(bids),
 }));
 
+export const collegeRelations = relations(colleges, ({ many }) => ({
+  providers: many(providers),
+  requests: many(requests),
+}));
 
-export const requestRelations = relations(requests, ({ one }) => ({
+export const serviceRelations = relations(services, ({ many }) => ({
+  providerServices: many(providerServices),
+  requests: many(requests),
+}));
+
+export const providerServiceRelations = relations(providerServices, ({ one }) => ({
+  provider: one(providers, {
+    fields: [providerServices.providerId],
+    references: [providers.id],
+  }),
+  service: one(services, {
+    fields: [providerServices.serviceId],
+    references: [services.id],
+  }),
+}));
+
+export const requestsRelations = relations(requests, ({ one, many }) => ({
   user: one(users, {
     fields: [requests.userId],
     references: [users.id],
@@ -153,12 +187,19 @@ export const requestRelations = relations(requests, ({ one }) => ({
     fields: [requests.collegeFilterId],
     references: [colleges.id],
   }),
-}));
-export const requestsRelations = relations(requests, ({ many }) => ({
   bids: many(bids),
+  // Handle the circular dependency through relations
+  acceptedBid: one(bids, {
+    fields: [requests.accepted_bid_id],
+    references: [bids.id],
+  }),
 }));
 
 export const bidsRelations = relations(bids, ({ one }) => ({
+  user: one(users, {
+    fields: [bids.userId],
+    references: [users.id],
+  }),
   request: one(requests, {
     fields: [bids.requestId],
     references: [requests.id],
@@ -169,24 +210,34 @@ export const bidsRelations = relations(bids, ({ one }) => ({
   }),
 }));
 
-
-export const providerServiceRelations = relations(providerServices, ({ one }) => ({
-  provider: one(providers, {
-    fields: [providerServices.providerId],
-    references: [providers.id],
-  }),
-  service: one(services, {
-    fields: [providerServices.serviceId],
-    references: [services.id],
+export const notificationsRelations = relations(notifications, ({ one }) => ({
+  user: one(users, {
+    fields: [notifications.userId],
+    references: [users.id],
   }),
 }));
-export const serviceRelations = relations(services, ({ many }) => ({
-  providerServices: many(providerServices),
-}));
 
- // Export types for TypeScript support
- export type TIUsers = typeof users.$inferInsert;
+// Export types for TypeScript support
+export type TIUsers = typeof users.$inferInsert;
 export type TSUsers = typeof users.$inferSelect;
 
 export type TIAuthentication = typeof Authentication.$inferInsert;
 export type TSAuthentication = typeof Authentication.$inferSelect;
+
+export type TIProviders = typeof providers.$inferInsert;
+export type TSProviders = typeof providers.$inferSelect;
+
+export type TIRequests = typeof requests.$inferInsert;
+export type TSRequests = typeof requests.$inferSelect;
+
+export type TIBids = typeof bids.$inferInsert;
+export type TSBids = typeof bids.$inferSelect;
+
+export type TIColleges = typeof colleges.$inferInsert;
+export type TSColleges = typeof colleges.$inferSelect;
+
+export type TIServices = typeof services.$inferInsert;
+export type TSServices = typeof services.$inferSelect;
+
+export type TINotifications = typeof notifications.$inferInsert;
+export type TSNotifications = typeof notifications.$inferSelect;

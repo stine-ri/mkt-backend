@@ -39,15 +39,23 @@ app.get('/requests', async (c) => {
     return c.json({ error: 'Invalid user ID' }, 400);
   }
 
-  const clientRequests: RequestWithRelations[] = await db.query.requests.findMany({
-    where: eq(requests.userId, userId),
-    with: {
-      service: true,
-      college: true,
-      bids: true,
-    },
-    orderBy: (requests, { desc }) => [desc(requests.createdAt)],
-  });
+const rawRequests = await db.query.requests.findMany({
+  where: eq(requests.userId, userId),
+  with: {
+    service: true,
+    college: true,
+    bids: true,
+  },
+  orderBy: (requests, { desc }) => [desc(requests.createdAt)],
+});
+
+const clientRequests: RequestWithRelations[] = rawRequests.map((req) => ({
+  ...req,
+  service: req.service ?? undefined,
+  college: req.college ?? undefined,
+  bids: req.bids ?? [],
+}));
+
 
   const formatted = clientRequests.map((r) => ({
     id: r.id,
