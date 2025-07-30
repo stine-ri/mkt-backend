@@ -183,76 +183,152 @@ app.get('/requests/:id/bids', async (c) => {
 
 // Accept a bid with enhanced validation
 app.post('/bids/:id/accept', async (c) => {
-  const userId = Number(c.get('user').id); // ✅ Convert to number
-  const bidId = parseInt(c.req.param('id'), 10);
+  console.log('=== Accept Bid Endpoint Started ===');
+  
+  try {
+    // Log initial request data
+    const rawUserId = c.get('user')?.id;
+    const rawBidId = c.req.param('id');
+    console.log('Raw user ID:', rawUserId);
+    console.log('Raw bid ID:', rawBidId);
+    console.log('User object:', c.get('user'));
 
-  if (isNaN(userId) || isNaN(bidId)) {
-    return c.json({ error: 'Invalid user or bid ID' }, 400);
-  }
+    const userId = Number(rawUserId);
+    const bidId = parseInt(rawBidId, 10);
+    
+    console.log('Parsed user ID:', userId, 'Type:', typeof userId);
+    console.log('Parsed bid ID:', bidId, 'Type:', typeof bidId);
 
-  const result = await db.transaction(async (tx) => {
-    const bidWithRequest = await tx.query.bids.findFirst({
-      where: eq(bids.id, bidId),
-      with: {
-        request: true,
-      },
+    if (isNaN(userId) || isNaN(bidId)) {
+      console.error('Invalid IDs - userId isNaN:', isNaN(userId), 'bidId isNaN:', isNaN(bidId));
+      return c.json({ error: 'Invalid user or bid ID' }, 400);
+    }
+
+    console.log('Starting database transaction...');
+    
+    const result = await db.transaction(async (tx) => {
+      console.log('Inside transaction, querying bid with ID:', bidId);
+      
+      const bidWithRequest = await tx.query.bids.findFirst({
+        where: eq(bids.id, bidId),
+        with: {
+          request: true,
+        },
+      });
+
+      console.log('Bid query result:', JSON.stringify(bidWithRequest, null, 2));
+
+      // ✅ Null check for bidWithRequest and bidWithRequest.request
+      if (!bidWithRequest) {
+        console.error('Bid not found with ID:', bidId);
+        throw new Error('Bid not found or unauthorized');
+      }
+
+      if (!bidWithRequest.request) {
+        console.error('Request not found for bid:', bidId);
+        throw new Error('Bid not found or unauthorized');
+      }
+
+      console.log('Request owner ID:', bidWithRequest.request.userId);
+      console.log('Current user ID:', userId);
+      console.log('Request status:', bidWithRequest.request.status);
+
+      if (bidWithRequest.request.userId !== userId) {
+        console.error('Unauthorized - request owner:', bidWithRequest.request.userId, 'current user:', userId);
+        throw new Error('Bid not found or unauthorized');
+      }
+
+      if (bidWithRequest.request.status !== 'open') {
+        console.error('Request not open, current status:', bidWithRequest.request.status);
+        throw new Error('Request is no longer open');
+      }
+
+      console.log('Accepting bid with ID:', bidId);
+      // ✅ Accept this bid
+      const acceptResult = await tx.update(bids)
+        .set({ status: 'accepted' })
+        .where(eq(bids.id, bidId));
+      console.log('Bid accept result:', acceptResult);
+
+      console.log('Closing request with ID:', bidWithRequest.request.id);
+      // ✅ Close the request
+      const closeResult = await tx.update(requests)
+        .set({ status: 'closed' })
+        .where(eq(requests.id, bidWithRequest.request.id));
+      console.log('Request close result:', closeResult);
+
+      console.log('Rejecting other pending bids for request:', bidWithRequest.request.id);
+      // ✅ Reject all other pending bids for this request
+      const rejectResult = await tx.update(bids)
+        .set({ status: 'rejected' })
+        .where(
+          and(
+            eq(bids.requestId, bidWithRequest.request.id),
+            eq(bids.status, 'pending')
+          )
+        );
+      console.log('Reject other bids result:', rejectResult);
+
+      console.log('Creating notifications...');
+      console.log('Provider ID:', bidWithRequest.providerId);
+      
+      if (!bidWithRequest.providerId) {
+        console.error('Provider ID is null/undefined for bid:', bidId);
+        throw new Error('Provider ID is missing from bid');
+      }
+
+      // ✅ Send notifications
+      const notificationData = [
+        {
+          userId: bidWithRequest.providerId,
+          type: 'bid_accepted',
+          message: `Your bid for request #${bidWithRequest.request.id} was accepted!`,
+          relatedEntityId: bidId,
+        },
+        {
+          userId: userId,
+          type: 'bid_accepted_confirmation',
+          message: `You accepted a bid from provider #${bidWithRequest.providerId} for request #${bidWithRequest.request.id}`,
+          relatedEntityId: bidWithRequest.request.id,
+        },
+      ];
+      
+      console.log('Notification data:', JSON.stringify(notificationData, null, 2));
+      
+      const notificationResult = await tx.insert(notifications).values(notificationData);
+      console.log('Notification insert result:', notificationResult);
+
+      console.log('Transaction completed successfully');
+      return { success: true };
     });
 
-    // ✅ Null check for bidWithRequest and bidWithRequest.request
-    if (
-      !bidWithRequest ||
-      !bidWithRequest.request ||
-      bidWithRequest.request.userId !== userId
-    ) {
-      throw new Error('Bid not found or unauthorized');
+    console.log('Final result:', result);
+    console.log('=== Accept Bid Endpoint Completed Successfully ===');
+    return c.json(result);
+    
+  } catch (error) {
+  console.error('=== ERROR in Accept Bid Endpoint ===');
+
+  if (error instanceof Error) {
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    console.error('Error details:', error);
+
+    // Return appropriate error response
+    if (error.message.includes('not found') || error.message.includes('unauthorized')) {
+      return c.json({ error: error.message }, 404);
+    } else if (error.message.includes('no longer open')) {
+      return c.json({ error: error.message }, 400);
+    } else {
+      return c.json({ error: 'Internal server error', details: error.message }, 500);
     }
+  } else {
+    console.error('Unknown error type:', error);
+    return c.json({ error: 'Internal server error' }, 500);
+  }
+}
 
-    if (bidWithRequest.request.status !== 'open') {
-      throw new Error('Request is no longer open');
-    }
-
-    // ✅ Accept this bid
-    await tx.update(bids)
-      .set({ status: 'accepted' })
-      .where(eq(bids.id, bidId));
-
-    // ✅ Close the request
-    await tx.update(requests)
-      .set({ status: 'closed' })
-      .where(eq(requests.id, bidWithRequest.request.id));
-
-    // ✅ Reject all other pending bids for this request
-    await tx.update(bids)
-      .set({ status: 'rejected' })
-      .where(
-        and(
-          eq(bids.requestId, bidWithRequest.request.id),
-          eq(bids.status, 'pending')
-        )
-      );
-
-    // ✅ Send notifications
-    await tx.insert(notifications).values([
-      {
-        userId: bidWithRequest.providerId!,
-        type: 'bid_accepted',
-        message: `Your bid for request #${bidWithRequest.request.id} was accepted!`,
-        relatedEntityId: bidId,
-      },
-      {
-        userId: userId,
-        type: 'bid_accepted_confirmation',
-        message: `You accepted a bid from provider #${bidWithRequest.providerId} for request #${bidWithRequest.request.id}`,
-        relatedEntityId: bidWithRequest.request.id,
-      },
-    ]);
-
-    return { success: true };
-  });
-
-  return c.json(result);
 });
-
 
 // Notification endpoints
 app.get('/notifications', async (c) => {
