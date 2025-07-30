@@ -14,35 +14,42 @@ export const verifyToken = async (token: string, secret: string) => {
 };
 
 export const authMiddleware = async (c: Context<CustomContext>, next: Next) => {
+  const publicRoutes = [
+    '/api/provider/public/all',
+    '/api/services',
+    // Add more public route paths here
+  ];
+
+  const path = c.req.path;
+  const isPublic = publicRoutes.some(publicRoute => path.startsWith(publicRoute));
+
   const token = c.req.header("Authorization")?.split(" ")[1];
 
-  if (!token) {
+  if (!token && !isPublic) {
     return c.json({ error: "Token not provided" }, 401);
   }
 
-  try {
-    console.log("Verifying token:", token); // Debug log
-    
-    const decoded = await verify(token, process.env.JWT_SECRET as string) as JwtPayload;
-    console.log("Decoded token:", decoded); // Debug log
+  if (token) {
+    try {
+      const decoded = await verify(token, process.env.JWT_SECRET as string) as JwtPayload;
 
-    if (!decoded || !decoded.id || !decoded.role) {
-      console.log("Invalid payload structure:", decoded);
-      return c.json({ error: "Invalid token payload" }, 401);
+      if (!decoded || !decoded.id || !decoded.role) {
+        return c.json({ error: "Invalid token payload" }, 401);
+      }
+
+      c.set("user", {
+        id: decoded.id,
+        email: decoded.email,
+        role: decoded.role,
+      });
+    } catch (error) {
+      return c.json({ error: "Invalid or expired token" }, 401);
     }
-
-    c.set("user", {
-      id: decoded.id,
-      email: decoded.email,
-      role: decoded.role,
-    });
-
-    await next();
-  } catch (error) {
-    console.error("Token verification error:", error);
-    return c.json({ error: "Invalid or expired token" }, 401);
   }
+
+  await next();
 };
+
 
 
 export const roleMiddleware = (requiredRole: JwtPayload['role']) => {
