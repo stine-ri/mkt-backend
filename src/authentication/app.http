@@ -161,3 +161,7 @@ Content-Type: application/json
     "email": "kmutai@gmail.com",
     "password": "2001km"
   }
+  ###
+  ###
+curl -X GET http://localhost:3000/api/provider/bids \
+  -H "Authorization: Bearer YOUR_TOKEN_HERE"

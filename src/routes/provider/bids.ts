@@ -15,8 +15,30 @@ app.use('*', authMiddleware, serviceProviderRoleAuth);
 
 app.get('/', async (c: Context<CustomContext>) => {
   const user = c.get('user'); // JwtPayload
-    const userId = Number(user.id);
+  const userId = Number(user.id);
 
+  if (user.role === 'admin') {
+    // Admin: Fetch all bids
+    const allBids = await db.query.bids.findMany({
+      with: {
+        provider: {
+          with: {
+            user: true, // Optional: if you want provider's user info
+          },
+        },
+        request: {
+          with: {
+            user: true,
+            service: true,
+          },
+        },
+      },
+    });
+
+    return c.json(allBids);
+  }
+
+  // For service provider: Get provider profile first
   const provider = await db.query.providers.findFirst({
     where: eq(providers.userId, userId),
   });
@@ -39,6 +61,7 @@ app.get('/', async (c: Context<CustomContext>) => {
 
   return c.json(providerBids);
 });
+
 
 // Place a new bid
 app.post('/', async (c) => {
