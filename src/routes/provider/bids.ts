@@ -272,5 +272,58 @@ app.post('/:id/reject', async (c) => {
     return c.json({ error: 'Internal server error' }, 500);
   }
 });
+app.put('/:id', async (c) => {
+  const bidId = Number(c.req.param('id'));
+  const userId = Number(c.get('user').id);
+  const { price, message } = await c.req.json();
+
+  const provider = await db.query.providers.findFirst({
+    where: eq(providers.userId, userId),
+  });
+
+  if (!provider) {
+    return c.json({ error: 'Provider not found' }, 404);
+  }
+
+  const bid = await db.query.bids.findFirst({
+    where: eq(bids.id, bidId),
+  });
+
+  if (!bid || bid.providerId !== provider.id) {
+    return c.json({ error: 'Unauthorized or bid not found' }, 403);
+  }
+
+  const [updatedBid] = await db.update(bids)
+    .set({ price, message })
+    .where(eq(bids.id, bidId))
+    .returning();
+
+  return c.json({ bid: updatedBid });
+});
+
+app.delete('/:id', async (c) => {
+  const bidId = Number(c.req.param('id'));
+  const userId = Number(c.get('user').id);
+
+  const provider = await db.query.providers.findFirst({
+    where: eq(providers.userId, userId),
+  });
+
+  if (!provider) {
+    return c.json({ error: 'Provider not found' }, 404);
+  }
+
+  const bid = await db.query.bids.findFirst({
+    where: eq(bids.id, bidId),
+  });
+
+  if (!bid || bid.providerId !== provider.id) {
+    return c.json({ error: 'Unauthorized or bid not found' }, 403);
+  }
+
+  await db.delete(bids).where(eq(bids.id, bidId));
+
+  return c.json({ message: 'Bid withdrawn successfully' });
+});
 
 export default app;
