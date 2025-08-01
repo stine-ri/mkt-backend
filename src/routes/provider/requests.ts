@@ -74,16 +74,49 @@ app.get('/', async (c: Context<CustomContext>) => {
 
     console.log('✅ User ID validated:', userId);
 
-    // Extract query parameters
+    // Extract query parameters including sorting
     const queryParams = c.req.query();
-    const { lat, lng, range = '50' } = queryParams;
+    const { lat, lng, range = '50', sort, orderBy, order } = queryParams;
     
     console.log('📍 Query parameters:', { 
       lat, 
       lng, 
       range,
+      sort,
+      orderBy,
+      order,
       allParams: queryParams 
     });
+
+    // Parse sorting parameters
+    let sortField = 'created_at';
+    let sortDirection = 'DESC';
+
+    if (sort) {
+      // Handle format like "created_at:desc"
+      const [field, direction] = sort.split(':');
+      if (field) sortField = field;
+      if (direction) sortDirection = direction.toUpperCase();
+    } else if (orderBy && order) {
+      // Handle separate orderBy and order parameters
+      sortField = orderBy;
+      sortDirection = order.toUpperCase();
+    }
+
+    // Validate sort field (security measure)
+    const allowedSortFields = ['created_at', 'updated_at', 'id', 'desired_price', 'title'];
+    if (!allowedSortFields.includes(sortField)) {
+      console.warn('⚠️ Invalid sort field provided:', sortField);
+      sortField = 'created_at';
+    }
+
+    // Validate sort direction
+    if (!['ASC', 'DESC'].includes(sortDirection)) {
+      console.warn('⚠️ Invalid sort direction provided:', sortDirection);
+      sortDirection = 'DESC';
+    }
+
+    console.log('📊 Final sorting parameters:', { sortField, sortDirection });
 
     // Database query for provider
     console.log('🔍 Fetching provider profile for user:', userId);
@@ -137,12 +170,25 @@ app.get('/', async (c: Context<CustomContext>) => {
             AND (
               r.college_filter_id IS NULL OR r.college_filter_id = ${provider.collegeId}
             )
+          ORDER BY r.${sql.raw(sortField)} ${sql.raw(sortDirection)}
         `);
 
         console.log('✅ Non-location query successful:', {
           rowCount: results.rows?.length || 0,
-          executionTime: Date.now() - startTime
+          executionTime: Date.now() - startTime,
+          sortApplied: `${sortField} ${sortDirection}`
         });
+
+        // Log first few results to verify sorting
+        if (results.rows && results.rows.length > 0) {
+          console.log('📋 First 3 results (sorted):', 
+            results.rows.slice(0, 3).map((row: any) => ({
+              id: row.id,
+              created_at: row.created_at,
+              title: row.title
+            }))
+          );
+        }
 
         return c.json(results.rows);
 
@@ -151,12 +197,14 @@ app.get('/', async (c: Context<CustomContext>) => {
           error: dbError,
           serviceIds,
           collegeId: provider.collegeId,
+          sortParams: { sortField, sortDirection },
           sqlParams: { serviceIds, collegeId: provider.collegeId }
         });
         throw new RouteError('Database query failed', 500, { 
           query: 'non-location',
           serviceIds,
-          collegeId: provider.collegeId 
+          collegeId: provider.collegeId,
+          sortParams: { sortField, sortDirection }
         });
       }
     }
@@ -213,7 +261,8 @@ app.get('/', async (c: Context<CustomContext>) => {
         center: { lat: numLat, lng: numLng },
         range: numRange,
         serviceIds,
-        collegeId: provider.collegeId
+        collegeId: provider.collegeId,
+        sorting: { sortField, sortDirection }
       });
 
       const results = await db.execute(sql`
@@ -224,7 +273,16 @@ app.get('/', async (c: Context<CustomContext>) => {
           c.name AS college_name,
           (
             SELECT json_agg(b.*) FROM bids b WHERE b.request_id = r.id
-          ) AS bids
+          ) AS bids,
+          (
+            6371 * acos(
+              cos(radians(${numLat})) * 
+              cos(radians((r.location::json->>'lat')::float)) * 
+              cos(radians((r.location::json->>'lng')::float) - radians(${numLng})) + 
+              sin(radians(${numLat})) * 
+              sin(radians((r.location::json->>'lat')::float))
+            )
+          ) AS distance_km
         FROM requests r
         LEFT JOIN users u ON u.user_id = r.user_id
         LEFT JOIN services s ON s.id = r.service_id
@@ -245,13 +303,27 @@ app.get('/', async (c: Context<CustomContext>) => {
           AND (
             r.college_filter_id IS NULL OR r.college_filter_id = ${provider.collegeId}
           )
+        ORDER BY r.${sql.raw(sortField)} ${sql.raw(sortDirection)}
       `);
 
       console.log('✅ Location-based query successful:', {
         rowCount: results.rows?.length || 0,
         executionTime: Date.now() - startTime,
-        queryParams: { numLat, numLng, numRange, serviceIds }
+        queryParams: { numLat, numLng, numRange, serviceIds },
+        sortApplied: `${sortField} ${sortDirection}`
       });
+
+      // Log first few results to verify sorting
+      if (results.rows && results.rows.length > 0) {
+        console.log('📋 First 3 results (location + sorted):', 
+          results.rows.slice(0, 3).map((row: any) => ({
+            id: row.id,
+            created_at: row.created_at,
+            title: row.title,
+            distance_km: row.distance_km
+          }))
+        );
+      }
 
       return c.json(results.rows);
 
@@ -261,6 +333,7 @@ app.get('/', async (c: Context<CustomContext>) => {
         coordinates: { numLat, numLng, numRange },
         serviceIds,
         collegeId: provider.collegeId,
+        sortParams: { sortField, sortDirection },
         sqlParams: { numLat, numLng, numRange, serviceIds, collegeId: provider.collegeId }
       });
       
@@ -278,7 +351,8 @@ app.get('/', async (c: Context<CustomContext>) => {
         query: 'location-based',
         coordinates: { numLat, numLng, numRange },
         serviceIds,
-        collegeId: provider.collegeId 
+        collegeId: provider.collegeId,
+        sortParams: { sortField, sortDirection }
       });
     }
 
