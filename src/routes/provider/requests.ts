@@ -118,16 +118,13 @@ app.get('/', async (c: Context<CustomContext>) => {
       console.log('📍 No coordinates provided, fetching all requests without location filter');
       
       try {
-        // CHANGED: By default, show ALL services unless explicitly filtered
-        // Only filter by services if filterByServices=true
         const serviceFilterCondition = filterByServices === 'true' && serviceIds.length > 0
           ? sql`AND r.service_id IN (${sql.join(serviceIds.map(id => sql`${id}`), sql`,`)})`
-          : sql``; // Show all services by default
+          : sql``;
 
-        // CHANGED: By default, show ALL college requests unless explicitly filtered
         const collegeFilterCondition = filterByServices === 'true' && provider.collegeId
           ? sql`AND (r.college_filter_id IS NULL OR r.college_filter_id = ${provider.collegeId})`
-          : sql``; // Show all college requests by default
+          : sql``;
 
         console.log('🔍 Query filters:', {
           serviceFilterApplied: filterByServices === 'true',
@@ -153,7 +150,8 @@ app.get('/', async (c: Context<CustomContext>) => {
               WHERE i.request_id = r.id
             ) AS interests
           FROM requests r
-          LEFT JOIN users u ON u.user_id = r.user_id          LEFT JOIN services s ON s.id = r.service_id
+          LEFT JOIN users u ON u.user_id = r.user_id
+          LEFT JOIN services s ON s.id = r.service_id
           LEFT JOIN colleges c ON c.id = r.college_filter_id
           WHERE r.status = 'open'
             ${serviceFilterCondition}
@@ -202,55 +200,24 @@ app.get('/', async (c: Context<CustomContext>) => {
     const numLng = parseFloat(lng);
     const numRange = parseFloat(range);
 
-    console.log('🧮 Coordinate conversion:', {
-      original: { lat, lng, range },
-      converted: { numLat, numLng, numRange },
-      valid: {
-        lat: !isNaN(numLat),
-        lng: !isNaN(numLng),
-        range: !isNaN(numRange)
-      }
-    });
-
     // Validate coordinates
     if (isNaN(numLat) || isNaN(numLng) || isNaN(numRange)) {
-      console.error('❌ Coordinate validation failed:', {
-        lat: { value: lat, parsed: numLat, valid: !isNaN(numLat) },
-        lng: { value: lng, parsed: numLng, valid: !isNaN(numLng) },
-        range: { value: range, parsed: numRange, valid: !isNaN(numRange) }
-      });
-      
       throw new ValidationError('Invalid coordinate values', 'coordinates', { lat, lng, range });
     }
 
-    // Additional coordinate range validation
     if (numLat < -90 || numLat > 90) {
-      console.error('❌ Latitude out of range:', numLat);
       throw new ValidationError('Latitude must be between -90 and 90');
     }
     
     if (numLng < -180 || numLng > 180) {
-      console.error('❌ Longitude out of range:', numLng);
       throw new ValidationError('Longitude must be between -180 and 180');
     }
     
     if (numRange <= 0 || numRange > 10000) {
-      console.error('❌ Range out of bounds:', numRange);
       throw new ValidationError('Range must be between 0 and 10000 km');
     }
 
-    console.log('✅ Coordinates validated successfully');
-
     try {
-      console.log('🔍 Executing location-based database query:', {
-        center: { lat: numLat, lng: numLng },
-        range: numRange,
-        serviceIds,
-        collegeId: provider.collegeId,
-        filterByServices: filterByServices === 'true'
-      });
-
-      // CHANGED: Same logic for location-based queries - show all by default
       const serviceFilterCondition = filterByServices === 'true' && serviceIds.length > 0
         ? sql`AND r.service_id IN (${sql.join(serviceIds.map(id => sql`${id}`), sql`,`)})`
         : sql``;
@@ -262,7 +229,8 @@ app.get('/', async (c: Context<CustomContext>) => {
       const results = await db.execute(sql`
         SELECT 
           r.*, 
-          u.email AS user_email, u.role AS user_role,
+          u.email AS user_email, 
+          u.role AS user_role,
           s.name AS service_name,
           c.name AS college_name,
           (
@@ -278,7 +246,8 @@ app.get('/', async (c: Context<CustomContext>) => {
             )
           ) AS distance_km
         FROM requests r
-        LEFT JOIN users u ON u.user_id = r.user_id        LEFT JOIN services s ON s.id = r.service_id
+        LEFT JOIN users u ON u.user_id = r.user_id
+        LEFT JOIN services s ON s.id = r.service_id
         LEFT JOIN colleges c ON c.id = r.college_filter_id
         WHERE r.status = 'open'
           AND r.location IS NOT NULL
@@ -299,13 +268,6 @@ app.get('/', async (c: Context<CustomContext>) => {
         LIMIT 100
       `);
 
-      console.log('✅ Location-based query successful:', {
-        rowCount: results.rows?.length || 0,
-        executionTime: Date.now() - startTime,
-        queryParams: { numLat, numLng, numRange },
-        showingAllServices: filterByServices !== 'true'
-      });
-
       return c.json({
         success: true,
         data: results.rows,
@@ -320,121 +282,26 @@ app.get('/', async (c: Context<CustomContext>) => {
       });
 
     } catch (dbError) {
-      console.error('❌ Database error in location-based query:', {
-        error: dbError,
-        coordinates: { numLat, numLng, numRange },
-        serviceIds,
-        collegeId: provider.collegeId
-      });
-      
-      // Check if it's a specific database error
-      const dbErr = dbError as DatabaseError;
-      if (dbErr.code) {
-        console.error('🔍 Database error details:', {
-          code: dbErr.code,
-          detail: dbErr.detail,
-          constraint: dbErr.constraint
-        });
-      }
-      
-      throw new RouteError('Location-based database query failed', 500, { 
-        query: 'location-based',
-        coordinates: { numLat, numLng, numRange },
-        serviceIds,
-        collegeId: provider.collegeId 
-      });
+      console.error('❌ Database error in location-based query:', dbError);
+      throw new RouteError('Location-based database query failed', 500);
     }
 
   } catch (error: unknown) {
-    const executionTime = Date.now() - startTime;
+    console.error('💥 Route error occurred:', error);
     
-    console.error('💥 Route error occurred:', {
-      executionTime,
-      userId,
-      errorType: error?.constructor?.name,
-      timestamp: new Date().toISOString()
-    });
-
-    // Handle different error types
     if (error instanceof RouteError) {
-      console.error('🎯 RouteError details:', {
-        message: error.message,
-        statusCode: error.statusCode,
-        context: error.context,
-        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-      });
-      
-      return c.json({ 
-        error: error.message,
-        ...(process.env.NODE_ENV === 'development' && { 
-          context: error.context,
-          stack: error.stack 
-        })
-      }, error.statusCode as any);
+     return c.json({ error: error.message }, error.statusCode as 400);
+
     }
 
     if (error instanceof ValidationError) {
-      console.error('📝 ValidationError details:', {
-        message: error.message,
-        field: error.field,
-        value: error.value,
-        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-      });
-      
       return c.json({ 
         error: 'Validation failed',
-        message: error.message,
-        ...(process.env.NODE_ENV === 'development' && { 
-          field: error.field,
-          value: error.value 
-        })
+        message: error.message
       }, 400);
     }
 
-    // Handle standard errors
-    const err = error as Error;
-    if (err && typeof err === 'object' && 'message' in err) {
-      console.error('⚡ Standard Error details:', {
-        name: err.name,
-        message: err.message,
-        stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
-      });
-      
-      // Check if it's a database-related error
-      const dbErr = err as DatabaseError;
-      if (dbErr.code || dbErr.detail) {
-        console.error('💾 Database error specifics:', {
-          code: dbErr.code,
-          detail: dbErr.detail,
-          constraint: dbErr.constraint
-        });
-      }
-      
-      return c.json({ 
-        error: 'Internal server error',
-        ...(process.env.NODE_ENV === 'development' && {
-          message: err.message,
-          name: err.name,
-          ...(dbErr.code && { dbCode: dbErr.code }),
-          ...(dbErr.detail && { dbDetail: dbErr.detail })
-        })
-      }, 500);
-    }
-
-    // Handle unknown error types
-    console.error('❓ Unknown error type:', {
-      error,
-      type: typeof error,
-      stringified: String(error)
-    });
-
-    return c.json({ 
-      error: 'Internal server error',
-      ...(process.env.NODE_ENV === 'development' && { 
-        unknownError: String(error),
-        type: typeof error 
-      })
-    }, 500);
+    return c.json({ error: 'Internal server error' }, 500);
   }
 });
 
