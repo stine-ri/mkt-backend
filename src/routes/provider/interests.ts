@@ -59,16 +59,25 @@ return c.json(result);
 // Get interests for the logged-in provider
 app.get('/my', async (c) => {
   const user = c.get('user');
-  const providerId = Number(user.id);
+  const userId = Number(user.id);
+
+  const provider = await db.query.providers.findFirst({
+    where: eq(providers.userId, userId)
+  });
+
+  if (!provider) {
+    return c.json({ error: 'Provider profile not found' }, 404);
+  }
 
   const result = await db.query.interests.findMany({
-    where: eq(interests.providerId, providerId),
+    where: eq(interests.providerId, provider.id),
     with: {
-      request: true, // Include related request info if needed
+      request: true,
     }
   });
 
   return c.json(result);
 });
+
 
 export default app;
