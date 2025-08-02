@@ -177,7 +177,7 @@ app.route('/api/colleges', collegesRoute);
 app.route('/api/client', clientRoutes);  // Fixed: added leading slash
 app.route('/', serviceRoutes);
 app.route('/', profileUploadHandler);
-app.route('/interests', interestRoutes);
+app.route('api/interests', interestRoutes);
 // Mount public provider routes
 app.route('/api/provider/public', publicProviderRoutes);
 // PROTECTED Admin endpoints (CREATE/UPDATE/DELETE operations)
