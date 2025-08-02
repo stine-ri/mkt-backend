@@ -56,3 +56,5 @@ const result = await db.query.interests.findMany({
 return c.json(result);
 
 });
+
+export default app;
