@@ -134,6 +134,47 @@ app.get('/my', async (c) => {
 }
 });
 
+// Delete an interest
+app.delete('/:interestId', async (c) => {
+  try {
+    const interestId = Number(c.req.param('interestId'));
+    const user = c.get('user');
+
+    // Get the provider
+    const provider = await db.query.providers.findFirst({
+      where: eq(providers.userId, Number(user.id))
+    });
+
+    if (!provider) {
+      return c.json({ error: 'Provider profile not found' }, 404);
+    }
+
+    // Check if the interest belongs to the provider
+    const interest = await db.query.interests.findFirst({
+      where: and(
+        eq(interests.id, interestId),
+        eq(interests.providerId, provider.id)
+      )
+    });
+
+    if (!interest) {
+      return c.json({ error: 'Interest not found or unauthorized' }, 404);
+    }
+
+    // Delete the interest
+    await db.delete(interests).where(eq(interests.id, interestId));
+
+    return c.json({ message: 'Interest deleted successfully' });
+
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Delete Interest Error:`, error);
+    return c.json({
+      error: 'Failed to delete interest',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
+  }
+});
+
 
 
 export default app;
