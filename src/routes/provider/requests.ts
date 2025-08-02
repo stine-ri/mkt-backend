@@ -76,12 +76,13 @@ app.get('/', async (c: Context<CustomContext>) => {
 
     // Extract query parameters
     const queryParams = c.req.query();
-    const { lat, lng, range = '50' } = queryParams;
+    const { lat, lng, range = '50', filterByServices = 'false' } = queryParams;
     
     console.log('📍 Query parameters:', { 
       lat, 
       lng, 
       range,
+      filterByServices,
       allParams: queryParams 
     });
 
@@ -117,50 +118,74 @@ app.get('/', async (c: Context<CustomContext>) => {
       console.log('📍 No coordinates provided, fetching all requests without location filter');
       
       try {
-      const results = await db.execute(sql`
-  SELECT 
-    r.*, 
-    u.email AS user_email, 
-    u.role AS user_role,
-    s.name AS service_name,
-    c.name AS college_name,
-    (
-      SELECT json_agg(b.*) FROM bids b WHERE b.request_id = r.id
-    ) AS bids,
-    (
-      SELECT json_agg(i.*) 
-      FROM interests i
-      LEFT JOIN providers p ON p.id = i.provider_id
-      WHERE i.request_id = r.id
-    ) AS interests
-  FROM requests r
-  LEFT JOIN users u ON u.user_id = r.user_id
-  LEFT JOIN services s ON s.id = r.service_id
-  LEFT JOIN colleges c ON c.id = r.college_filter_id
-  WHERE r.status = 'open'
-    ${serviceIds.length > 0 
-      ? sql`AND r.service_id IN (${sql.join(serviceIds.map(id => sql`${id}`), sql`,`)})`
-      : sql``}
-    AND (
-      r.college_filter_id IS NULL OR r.college_filter_id = ${provider.collegeId}
-    )
-`);
+        // CHANGED: By default, show ALL services unless explicitly filtered
+        // Only filter by services if filterByServices=true
+        const serviceFilterCondition = filterByServices === 'true' && serviceIds.length > 0
+          ? sql`AND r.service_id IN (${sql.join(serviceIds.map(id => sql`${id}`), sql`,`)})`
+          : sql``; // Show all services by default
 
+        // CHANGED: By default, show ALL college requests unless explicitly filtered
+        const collegeFilterCondition = filterByServices === 'true' && provider.collegeId
+          ? sql`AND (r.college_filter_id IS NULL OR r.college_filter_id = ${provider.collegeId})`
+          : sql``; // Show all college requests by default
 
+        console.log('🔍 Query filters:', {
+          serviceFilterApplied: filterByServices === 'true',
+          serviceIds: serviceIds,
+          collegeFilterApplied: filterByServices === 'true',
+          collegeId: provider.collegeId
+        });
+
+        const results = await db.execute(sql`
+          SELECT 
+            r.*, 
+            u.email AS user_email, 
+            u.role AS user_role,
+            s.name AS service_name,
+            c.name AS college_name,
+            (
+              SELECT json_agg(b.*) FROM bids b WHERE b.request_id = r.id
+            ) AS bids,
+            (
+              SELECT json_agg(i.*) 
+              FROM interests i
+              LEFT JOIN providers p ON p.id = i.provider_id
+              WHERE i.request_id = r.id
+            ) AS interests
+          FROM requests r
+          LEFT JOIN users u ON u.id = r.user_id
+          LEFT JOIN services s ON s.id = r.service_id
+          LEFT JOIN colleges c ON c.id = r.college_filter_id
+          WHERE r.status = 'open'
+            ${serviceFilterCondition}
+            ${collegeFilterCondition}
+          ORDER BY r.created_at DESC
+          LIMIT 100
+        `);
 
         console.log('✅ Non-location query successful:', {
           rowCount: results.rows?.length || 0,
-          executionTime: Date.now() - startTime
+          executionTime: Date.now() - startTime,
+          showingAllServices: filterByServices !== 'true'
         });
 
-        return c.json(results.rows);
+        return c.json({
+          success: true,
+          data: results.rows,
+          total: results.rows?.length || 0,
+          filters: {
+            serviceFiltered: filterByServices === 'true',
+            collegeFiltered: filterByServices === 'true',
+            serviceIds: serviceIds,
+            showingAllServices: filterByServices !== 'true'
+          }
+        });
 
       } catch (dbError) {
         console.error('❌ Database error in non-location query:', {
           error: dbError,
           serviceIds,
-          collegeId: provider.collegeId,
-          sqlParams: { serviceIds, collegeId: provider.collegeId }
+          collegeId: provider.collegeId
         });
         throw new RouteError('Database query failed', 500, { 
           query: 'non-location',
@@ -222,8 +247,18 @@ app.get('/', async (c: Context<CustomContext>) => {
         center: { lat: numLat, lng: numLng },
         range: numRange,
         serviceIds,
-        collegeId: provider.collegeId
+        collegeId: provider.collegeId,
+        filterByServices: filterByServices === 'true'
       });
+
+      // CHANGED: Same logic for location-based queries - show all by default
+      const serviceFilterCondition = filterByServices === 'true' && serviceIds.length > 0
+        ? sql`AND r.service_id IN (${sql.join(serviceIds.map(id => sql`${id}`), sql`,`)})`
+        : sql``;
+
+      const collegeFilterCondition = filterByServices === 'true' && provider.collegeId
+        ? sql`AND (r.college_filter_id IS NULL OR r.college_filter_id = ${provider.collegeId})`
+        : sql``;
 
       const results = await db.execute(sql`
         SELECT 
@@ -233,44 +268,65 @@ app.get('/', async (c: Context<CustomContext>) => {
           c.name AS college_name,
           (
             SELECT json_agg(b.*) FROM bids b WHERE b.request_id = r.id
-          ) AS bids
+          ) AS bids,
+          (
+            6371 * acos(
+              cos(radians(${numLat})) * 
+              cos(radians(COALESCE((r.location::json->>'lat')::float, 0))) * 
+              cos(radians(COALESCE((r.location::json->>'lng')::float, 0)) - radians(${numLng})) + 
+              sin(radians(${numLat})) * 
+              sin(radians(COALESCE((r.location::json->>'lat')::float, 0)))
+            )
+          ) AS distance_km
         FROM requests r
-        LEFT JOIN users u ON u.user_id = r.user_id
+        LEFT JOIN users u ON u.id = r.user_id
         LEFT JOIN services s ON s.id = r.service_id
         LEFT JOIN colleges c ON c.id = r.college_filter_id
         WHERE r.status = 'open'
+          AND r.location IS NOT NULL
+          AND r.location != '{}'
+          AND r.location != '\"{}\"'
           AND (
             6371 * acos(
               cos(radians(${numLat})) * 
-              cos(radians((r.location::json->>'lat')::float)) * 
-              cos(radians((r.location::json->>'lng')::float) - radians(${numLng})) + 
+              cos(radians(COALESCE((r.location::json->>'lat')::float, 0))) * 
+              cos(radians(COALESCE((r.location::json->>'lng')::float, 0)) - radians(${numLng})) + 
               sin(radians(${numLat})) * 
-              sin(radians((r.location::json->>'lat')::float))
+              sin(radians(COALESCE((r.location::json->>'lat')::float, 0)))
             )
           ) <= ${numRange}
-          ${serviceIds.length > 0 
-            ? sql`AND r.service_id IN (${sql.join(serviceIds.map(id => sql`${id}`), sql`,`)})`
-            : sql``}
-          AND (
-            r.college_filter_id IS NULL OR r.college_filter_id = ${provider.collegeId}
-          )
+          ${serviceFilterCondition}
+          ${collegeFilterCondition}
+        ORDER BY r.created_at DESC
+        LIMIT 100
       `);
 
       console.log('✅ Location-based query successful:', {
         rowCount: results.rows?.length || 0,
         executionTime: Date.now() - startTime,
-        queryParams: { numLat, numLng, numRange, serviceIds }
+        queryParams: { numLat, numLng, numRange },
+        showingAllServices: filterByServices !== 'true'
       });
 
-      return c.json(results.rows);
+      return c.json({
+        success: true,
+        data: results.rows,
+        total: results.rows?.length || 0,
+        filters: {
+          location: { lat: numLat, lng: numLng, range: numRange },
+          serviceFiltered: filterByServices === 'true',
+          collegeFiltered: filterByServices === 'true',
+          serviceIds: serviceIds,
+          showingAllServices: filterByServices !== 'true'
+        }
+      });
 
     } catch (dbError) {
       console.error('❌ Database error in location-based query:', {
         error: dbError,
         coordinates: { numLat, numLng, numRange },
         serviceIds,
-        collegeId: provider.collegeId,
-        sqlParams: { numLat, numLng, numRange, serviceIds, collegeId: provider.collegeId }
+        collegeId: provider.collegeId
       });
       
       // Check if it's a specific database error
@@ -383,6 +439,8 @@ app.get('/', async (c: Context<CustomContext>) => {
     }, 500);
   }
 });
+
+
 app.post('/', async (c) => {
   const userId = Number(c.get('user').id);
   const body = await c.req.json();
