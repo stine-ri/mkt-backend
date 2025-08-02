@@ -6,6 +6,7 @@ import { eq, and, lte, gte, sql } from 'drizzle-orm';
 import {authMiddleware, serviceProviderRoleAuth  } from '../../middleware/bearAuth.js';
 import type { CustomContext } from '../../types/context.js';
 import { notifyNearbyProviders } from '../../lib/providerNotifications.js';
+import { RouteError } from '../../utils/error.js'; 
 
 const app = new Hono<CustomContext>();
 
@@ -32,16 +33,16 @@ class ValidationError extends Error {
   }
 }
 
-class RouteError extends Error {
-  constructor(
-    message: string,
-    public statusCode: number = 500,
-    public context?: Record<string, unknown>
-  ) {
-    super(message);
-    this.name = 'RouteError';
-  }
-}
+// class RouteError extends Error {
+//   constructor(
+//     message: string,
+//     public statusCode: number = 500,
+//     public context?: Record<string, unknown>
+//   ) {
+//     super(message);
+//     this.name = 'RouteError';
+//   }
+// }
 
 app.get('/', async (c: Context<CustomContext>) => {
   const startTime = Date.now();
@@ -166,17 +167,8 @@ app.get('/', async (c: Context<CustomContext>) => {
           showingAllServices: filterByServices !== 'true'
         });
 
-        return c.json({
-          success: true,
-          data: results.rows,
-          total: results.rows?.length || 0,
-          filters: {
-            serviceFiltered: filterByServices === 'true',
-            collegeFiltered: filterByServices === 'true',
-            serviceIds: serviceIds,
-            showingAllServices: filterByServices !== 'true'
-          }
-        });
+        // Return data directly as array (fix for frontend .map() error)
+        return c.json(results.rows);
 
       } catch (dbError) {
         console.error('❌ Database error in non-location query:', {
@@ -250,9 +242,9 @@ app.get('/', async (c: Context<CustomContext>) => {
         LEFT JOIN services s ON s.id = r.service_id
         LEFT JOIN colleges c ON c.id = r.college_filter_id
         WHERE r.status = 'open'
-          AND r.location IS NOT NULL
-          AND r.location != '{}'
-          AND r.location != '\"{}\"'
+          AND jsonb_typeof(r.location::jsonb) = 'object'  -- Ensure location is valid JSON object
+          AND r.location::jsonb ? 'lat'                   -- Ensure has lat property
+          AND r.location::jsonb ? 'lng'                   -- Ensure has lng property
           AND (
             6371 * acos(
               cos(radians(${numLat})) * 
@@ -268,18 +260,8 @@ app.get('/', async (c: Context<CustomContext>) => {
         LIMIT 100
       `);
 
-      return c.json({
-        success: true,
-        data: results.rows,
-        total: results.rows?.length || 0,
-        filters: {
-          location: { lat: numLat, lng: numLng, range: numRange },
-          serviceFiltered: filterByServices === 'true',
-          collegeFiltered: filterByServices === 'true',
-          serviceIds: serviceIds,
-          showingAllServices: filterByServices !== 'true'
-        }
-      });
+      // Return data directly as array (fix for frontend .map() error)
+      return c.json(results.rows);
 
     } catch (dbError) {
       console.error('❌ Database error in location-based query:', dbError);
@@ -290,18 +272,26 @@ app.get('/', async (c: Context<CustomContext>) => {
     console.error('💥 Route error occurred:', error);
     
     if (error instanceof RouteError) {
-     return c.json({ error: error.message }, error.statusCode as 400);
-
+      return c.json({ 
+        error: error.message,
+        ...(error.context && { details: error.context })
+      }, error.statusCode);
     }
 
     if (error instanceof ValidationError) {
       return c.json({ 
         error: 'Validation failed',
-        message: error.message
+        message: error.message,
+        ...(error.field && { field: error.field })
       }, 400);
     }
 
-    return c.json({ error: 'Internal server error' }, 500);
+    return c.json({ 
+      error: 'Internal server error',
+      ...(process.env.NODE_ENV === 'development' && {
+        message: error instanceof Error ? error.message : String(error)
+      })
+    }, 500);
   }
 });
 
