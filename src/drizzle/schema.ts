@@ -162,6 +162,7 @@ export const providerRelations = relations(providers, ({ many, one }) => ({
   }),
   services: many(providerServices),
   bids: many(bids),
+  interests: many(interests),
 }));
 
 export const collegeRelations = relations(colleges, ({ many }) => ({
@@ -198,6 +199,7 @@ export const requestsRelations = relations(requests, ({ one, many }) => ({
     fields: [requests.collegeFilterId],
     references: [colleges.id],
   }),
+  interests: many(interests),
   bids: many(bids),
   // Handle the circular dependency through relations
   acceptedBid: one(bids, {
@@ -227,7 +229,16 @@ export const notificationsRelations = relations(notifications, ({ one }) => ({
     references: [users.id],
   }),
 }));
-
+export const interestsRelations = relations(interests, ({ one }) => ({
+  request: one(requests, {
+    fields: [interests.requestId],
+    references: [requests.id],
+  }),
+  provider: one(providers, {
+    fields: [interests.providerId],
+    references: [providers.id],
+  }),
+}));
 // Export types for TypeScript support
 export type TIUsers = typeof users.$inferInsert;
 export type TSUsers = typeof users.$inferSelect;

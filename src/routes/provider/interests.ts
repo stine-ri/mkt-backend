@@ -58,26 +58,51 @@ return c.json(result);
 });
 // Get interests for the logged-in provider
 app.get('/my', async (c) => {
-  const user = c.get('user');
-  const userId = Number(user.id);
+  try {
+    const user = c.get('user');
+    const userId = Number(user.id);
 
-  const provider = await db.query.providers.findFirst({
-    where: eq(providers.userId, userId)
-  });
+    // Find provider profile
+    const provider = await db.query.providers.findFirst({
+      where: eq(providers.userId, userId)
+    });
 
-  if (!provider) {
-    return c.json({ error: 'Provider profile not found' }, 404);
+    if (!provider) {
+      return c.json({ error: 'Provider profile not found' }, 404);
+    }
+
+    // Fetch interests with request data
+    const result = await db.query.interests.findMany({
+      where: eq(interests.providerId, provider.id),
+      with: {
+        request: {
+          with: {
+            service: true, // Include service details if needed
+            user: true    // Include user details if needed
+          }
+        },
+      }
+    });
+
+    return c.json(result);
+    
+  } catch (error) {
+  console.error('Error fetching interests:', error);
+
+  if (error instanceof Error) {
+    return c.json({ 
+      error: 'Failed to fetch interests',
+      details: error.message 
+    }, 500);
   }
 
-  const result = await db.query.interests.findMany({
-    where: eq(interests.providerId, provider.id),
-    with: {
-      request: true,
-    }
-  });
-
-  return c.json(result);
+  return c.json({
+    error: 'Failed to fetch interests',
+    details: 'An unknown error occurred'
+  }, 500);
+}
 });
+
 
 
 export default app;
