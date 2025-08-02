@@ -153,8 +153,7 @@ app.get('/', async (c: Context<CustomContext>) => {
               WHERE i.request_id = r.id
             ) AS interests
           FROM requests r
-          LEFT JOIN users u ON u.id = r.user_id
-          LEFT JOIN services s ON s.id = r.service_id
+          LEFT JOIN users u ON u.user_id = r.user_id          LEFT JOIN services s ON s.id = r.service_id
           LEFT JOIN colleges c ON c.id = r.college_filter_id
           WHERE r.status = 'open'
             ${serviceFilterCondition}
@@ -279,8 +278,7 @@ app.get('/', async (c: Context<CustomContext>) => {
             )
           ) AS distance_km
         FROM requests r
-        LEFT JOIN users u ON u.id = r.user_id
-        LEFT JOIN services s ON s.id = r.service_id
+        LEFT JOIN users u ON u.user_id = r.user_id        LEFT JOIN services s ON s.id = r.service_id
         LEFT JOIN colleges c ON c.id = r.college_filter_id
         WHERE r.status = 'open'
           AND r.location IS NOT NULL
