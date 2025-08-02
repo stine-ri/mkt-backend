@@ -56,5 +56,19 @@ const result = await db.query.interests.findMany({
 return c.json(result);
 
 });
+// Get interests for the logged-in provider
+app.get('/my', async (c) => {
+  const user = c.get('user');
+  const providerId = Number(user.id);
+
+  const result = await db.query.interests.findMany({
+    where: eq(interests.providerId, providerId),
+    with: {
+      request: true, // Include related request info if needed
+    }
+  });
+
+  return c.json(result);
+});
 
 export default app;
