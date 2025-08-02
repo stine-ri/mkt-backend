@@ -117,27 +117,34 @@ app.get('/', async (c: Context<CustomContext>) => {
       console.log('📍 No coordinates provided, fetching all requests without location filter');
       
       try {
-        const results = await db.execute(sql`
-          SELECT 
-            r.*, 
-            u.email AS user_email, u.role AS user_role,
-            s.name AS service_name,
-            c.name AS college_name,
-            (
-              SELECT json_agg(b.*) FROM bids b WHERE b.request_id = r.id
-            ) AS bids
-          FROM requests r
-          LEFT JOIN users u ON u.user_id = r.user_id
-          LEFT JOIN services s ON s.id = r.service_id
-          LEFT JOIN colleges c ON c.id = r.college_filter_id
-          WHERE r.status = 'open'
-            ${serviceIds.length > 0 
-              ? sql`AND r.service_id IN (${sql.join(serviceIds.map(id => sql`${id}`), sql`,`)})`
-              : sql``}
-            AND (
-              r.college_filter_id IS NULL OR r.college_filter_id = ${provider.collegeId}
-            )
-        `);
+       const results = await db.execute(sql`
+      SELECT 
+        r.*, 
+        u.email AS user_email, 
+        u.role AS user_role,
+        s.name AS service_name,
+        c.name AS college_name,
+        (
+          SELECT json_agg(b.*) FROM bids b WHERE b.request_id = r.id
+        ) AS bids,
+        (
+          SELECT json_agg(i.*) FROM interests i 
+          WHERE i.request_id = r.id
+          LEFT JOIN providers p ON p.id = i.provider_id
+        ) AS interests
+      FROM requests r
+      LEFT JOIN users u ON u.user_id = r.user_id
+      LEFT JOIN services s ON s.id = r.service_id
+      LEFT JOIN colleges c ON c.id = r.college_filter_id
+      WHERE r.status = 'open'
+        ${serviceIds.length > 0 
+          ? sql`AND r.service_id IN (${sql.join(serviceIds.map(id => sql`${id}`), sql`,`)})`
+          : sql``}
+        AND (
+          r.college_filter_id IS NULL OR r.college_filter_id = ${provider.collegeId}
+        )
+    `);
+
 
         console.log('✅ Non-location query successful:', {
           rowCount: results.rows?.length || 0,

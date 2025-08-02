@@ -95,7 +95,8 @@ export const requests = pgTable('requests', {
   location: varchar('location', { length: 255 }).notNull(),
   collegeFilterId: integer('college_filter_id').references(() => colleges.id),
   status: varchar('status', { enum: ['open', 'closed', 'pending'] }).default('open'),
-  
+  allowInterests: boolean('allow_interests').default(true),
+  allowBids: boolean('allow_bids').default(true),
   // Store accepted bid ID without foreign key constraint to avoid circular dependency
   accepted_bid_id: integer('accepted_bid_id'),
   
@@ -123,6 +124,16 @@ export const notifications = pgTable('notifications', {
   relatedEntityId: integer('related_entity_id'),
   isRead: boolean('is_read').default(false),
   createdAt: timestamp('created_at').defaultNow(),
+});
+export const interests = pgTable('interests', {
+  id: serial('id').primaryKey(),
+  requestId: integer('request_id')
+    .references(() => requests.id, { onDelete: 'cascade' }),
+  providerId: integer('provider_id')
+    .references(() => providers.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at').defaultNow(),
+  message: text('message'),
+  isShortlisted: boolean('is_shortlisted').default(false),
 });
 
 // Define all relations
