@@ -12,14 +12,18 @@ app.post('/:requestId', async (c) => {
   try {
     const requestId = Number(c.req.param('requestId'));
     const user = c.get('user');
-    
+
     // 1. Verify provider exists first
     const provider = await db.query.providers.findFirst({
       where: eq(providers.userId, Number(user.id))
     });
 
+    // Consider adding more context to the 404 responses
     if (!provider) {
-      return c.json({ error: "Provider profile not found" }, 404);
+      return c.json({ 
+        error: "Provider profile not found",
+        solution: "Please complete your provider profile first"
+      }, 404);
     }
 
     // 2. Then proceed with existing checks
@@ -31,7 +35,10 @@ app.post('/:requestId', async (c) => {
     });
 
     if (!request) {
-      return c.json({ error: "Request not available" }, 404);
+      return c.json({ 
+        error: "Request not available",
+        solution: "This request may have been closed or does not accept interests"
+      }, 404);
     }
 
     const existingInterest = await db.query.interests.findFirst({
@@ -41,27 +48,33 @@ app.post('/:requestId', async (c) => {
       )
     });
 
+    // Add more detailed conflict message
     if (existingInterest) {
-      return c.json({ error: "Interest already exists" }, 409);
+      return c.json({ 
+        error: "Interest already exists",
+        existingInterestId: existingInterest.id // Helps with debugging
+      }, 409);
     }
 
     // 3. Create interest with validated provider.id
     const [newInterest] = await db.insert(interests).values({
       requestId,
-      providerId: provider.id, // Use the provider's table ID
+      providerId: provider.id,
       createdAt: new Date()
     }).returning();
 
     return c.json(newInterest, 201);
 
   } catch (error) {
-    console.error("Error:", error);
+    // Add timestamp to error logs for debugging
+    console.error(`[${new Date().toISOString()}] Error:`, error);
     return c.json({ 
       error: "Internal server error",
       details: error instanceof Error ? error.message : 'Unknown error'
     }, 500);
   }
 });
+
 // Get interests for a request
 app.get('/request/:requestId', async (c) => {
   const requestId = c.req.param('requestId');
