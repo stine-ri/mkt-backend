@@ -10,25 +10,19 @@ const app = new Hono<CustomContext>();
 // Express interest
 app.post('/:requestId', async (c) => {
   try {
-    const requestIdParam = c.req.param('requestId');
-    const requestId = Number(requestIdParam);
-    
-    // Validate request ID
-    if (isNaN(requestId)) {
-      return c.json({ error: "Invalid request ID format" }, 400);
-    }
-
+    const requestId = Number(c.req.param('requestId'));
     const user = c.get('user');
-    if (!user) {
-      return c.json({ error: "Unauthorized - No user found" }, 401);
+    
+    // 1. Verify provider exists first
+    const provider = await db.query.providers.findFirst({
+      where: eq(providers.userId, Number(user.id))
+    });
+
+    if (!provider) {
+      return c.json({ error: "Provider profile not found" }, 404);
     }
 
-    const providerId = Number(user.id);
-    if (isNaN(providerId)) {
-      return c.json({ error: "Invalid provider ID" }, 400);
-    }
-
-    // Verify request exists and accepts interests
+    // 2. Then proceed with existing checks
     const request = await db.query.requests.findFirst({
       where: and(
         eq(requests.id, requestId),
@@ -37,39 +31,37 @@ app.post('/:requestId', async (c) => {
     });
 
     if (!request) {
-      return c.json({ error: "Request not found or doesn't accept interests" }, 404);
+      return c.json({ error: "Request not available" }, 404);
     }
 
-    // Check for existing interest
-    const exists = await db.query.interests.findFirst({
+    const existingInterest = await db.query.interests.findFirst({
       where: and(
         eq(interests.requestId, requestId),
-        eq(interests.providerId, providerId)
+        eq(interests.providerId, provider.id) // Use provider.id not user.id
       )
     });
 
-    if (exists) {
-      return c.json({ error: "Already expressed interest" }, 400);
+    if (existingInterest) {
+      return c.json({ error: "Interest already exists" }, 409);
     }
 
-    // Create interest
-    const [interest] = await db.insert(interests).values({
-      requestId: requestId,
-      providerId: providerId,
-      createdAt: new Date() // Add timestamp if your schema requires it
+    // 3. Create interest with validated provider.id
+    const [newInterest] = await db.insert(interests).values({
+      requestId,
+      providerId: provider.id, // Use the provider's table ID
+      createdAt: new Date()
     }).returning();
 
-    return c.json(interest, 201);
+    return c.json(newInterest, 201);
 
   } catch (error) {
-    console.error('Error in express interest endpoint:', error);
+    console.error("Error:", error);
     return c.json({ 
       error: "Internal server error",
       details: error instanceof Error ? error.message : 'Unknown error'
     }, 500);
   }
 });
-
 // Get interests for a request
 app.get('/request/:requestId', async (c) => {
   const requestId = c.req.param('requestId');
