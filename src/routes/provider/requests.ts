@@ -64,13 +64,15 @@ type QueryOptions = {
   };
 };
 
-function tryParseJson(str: any) {
+function tryParseJson(input: any): any {
+  if (typeof input !== 'string') return input; // Already parsed or invalid
   try {
-    return typeof str === 'string' ? JSON.parse(str) : str;
+    return JSON.parse(input);
   } catch {
     return null;
   }
 }
+
 
 app.get('/', async (c: Context<CustomContext>) => {
   const startTime = Date.now();
@@ -166,15 +168,25 @@ app.get('/', async (c: Context<CustomContext>) => {
       SELECT 
         r.*,
         CASE 
-          WHEN r.location IS NULL THEN NULL
-          WHEN jsonb_typeof(r.location::jsonb) = 'object' THEN 
-            json_build_object(
-              'lat', (r.location::json->>'lat')::float,
-              'lng', (r.location::json->>'lng')::float,
-              'address', COALESCE(r.location::json->>'address', 'Not specified')
+      WHEN r.location IS NULL THEN NULL
+      WHEN jsonb_typeof(r.location::jsonb) = 'object' THEN 
+        CASE
+          -- Check for empty/zero location
+          WHEN (r.location::json->>'lat')::float = 0 AND 
+               (r.location::json->>'lng')::float = 0 AND
+               (r.location::json->>'address' IS NULL OR 
+                r.location::json->>'address' = 'Not specified') THEN NULL
+          ELSE json_build_object(
+            'lat', (r.location::json->>'lat')::float,
+            'lng', (r.location::json->>'lng')::float,
+            'address', COALESCE(
+              NULLIF(r.location::json->>'address', 'Not specified'),
+              NULL
             )
-          ELSE NULL
-        END AS formatted_location,
+          )
+        END
+      ELSE NULL
+    END AS formatted_location,
         u.email AS user_email, 
         u.role AS user_role,
         s.name AS service_name,
@@ -206,17 +218,21 @@ app.get('/', async (c: Context<CustomContext>) => {
     });
 
     // Format location field from formatted_location
- const formattedResults = results.rows.map(row => {
-  let location;
+const formattedResults = results.rows.map(row => {
+  let location = null;
 
   if (row.formatted_location) {
     location = row.formatted_location;
   } else if (row.location) {
-    location = typeof row.location === 'object'
-      ? row.location
-      : tryParseJson(row.location);
-  } else {
-    location = null;
+    try {
+      location = typeof row.location === 'object'
+        ? row.location
+        : typeof row.location === 'string'
+          ? JSON.parse(row.location)
+          : null;
+    } catch {
+      location = null;
+    }
   }
 
   return {
@@ -224,6 +240,7 @@ app.get('/', async (c: Context<CustomContext>) => {
     location,
   };
 });
+
     return c.json(formattedResults);
 
   } catch (dbError) {
