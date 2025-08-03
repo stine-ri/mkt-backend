@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { db } from '../../drizzle/db.js';
-import { requests, providers, colleges, bids, notifications } from '../../drizzle/schema.js';
-import { eq, and, lte, gte, sql } from 'drizzle-orm';
+import { requests, providers, colleges, bids, notifications, interests,TSInterests,TSProviders, TSBids, TSRequests, TSUsers } from '../../drizzle/schema.js';
+import { eq, and, lte, gte, sql , desc,count } from 'drizzle-orm';
 import {authMiddleware, serviceProviderRoleAuth  } from '../../middleware/bearAuth.js';
 import type { CustomContext } from '../../types/context.js';
 import { notifyNearbyProviders } from '../../lib/providerNotifications.js';
@@ -32,17 +32,37 @@ class ValidationError extends Error {
     this.value = value;
   }
 }
-
-// class RouteError extends Error {
-//   constructor(
-//     message: string,
-//     public statusCode: number = 500,
-//     public context?: Record<string, unknown>
-//   ) {
-//     super(message);
-//     this.name = 'RouteError';
-//   }
-// }
+type RequestWithRelations = TSRequests & {
+  bids: (TSBids & {
+    provider: TSProviders & {
+      user: TSUsers | null;
+    } | null;
+  })[];
+  interests: (TSInterests & {
+    provider: TSProviders & {
+      user: TSUsers | null;
+    } | null;
+  })[];
+};
+type QueryOptions = {
+  where: any; // (or your specific condition type)
+  orderBy: any[]; // replace with your actual orderBy type if needed
+  with: {
+    bids?: true;
+    interests?: {
+      with: {
+        provider: {
+          with: {
+            user: true;
+          };
+        };
+      };
+    };
+    user?: true;
+    service?: true;
+    college?: true;
+  };
+};
 
 app.get('/', async (c: Context<CustomContext>) => {
   const startTime = Date.now();
@@ -291,6 +311,55 @@ app.get('/', async (c: Context<CustomContext>) => {
       ...(process.env.NODE_ENV === 'development' && {
         message: error instanceof Error ? error.message : String(error)
       })
+    }, 500);
+  }
+});
+
+
+
+///interests
+
+app.get('/', async (c) => {
+  try {
+    const user = c.get('user');
+    const includeParam = c.req.query('include') || '';
+    const shouldIncludeInterests = includeParam.includes('interests');
+    const shouldIncludeBids = includeParam.includes('bids');
+    
+    // Build the query with proper relations - type it as any to avoid TS issues
+    const queryOptions: any = {
+      where: eq(requests.userId, Number(user.id)),
+      orderBy: [desc(requests.createdAt)],
+      with: {}
+    };
+
+    // Add relations based on include parameter
+    if (shouldIncludeBids) {
+      queryOptions.with.bids = true;
+    }
+
+    if (shouldIncludeInterests) {
+      queryOptions.with.interests = {
+        with: {
+          provider: {
+            with: {
+              user: true,
+            },
+          },
+        },
+      };
+    }
+
+    const userRequests = await db.query.requests.findMany(queryOptions);
+
+    return c.json(userRequests); // Return array directly
+
+  } catch (error) {
+    console.error('Error fetching requests:', error);
+    return c.json({ 
+      success: false,
+      error: 'Failed to fetch requests',
+      details: error instanceof Error ? error.message : String(error)
     }, 500);
   }
 });

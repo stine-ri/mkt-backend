@@ -286,6 +286,9 @@ export type TSProviders = typeof providers.$inferSelect;
 export type TIRequests = typeof requests.$inferInsert;
 export type TSRequests = typeof requests.$inferSelect;
 
+export type TIInterests = typeof interests .$inferInsert;
+export type TSInterests = typeof interests .$inferSelect;
+
 export type TIBids = typeof bids.$inferInsert;
 export type TSBids = typeof bids.$inferSelect;
 
