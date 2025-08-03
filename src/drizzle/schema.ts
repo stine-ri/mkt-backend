@@ -170,6 +170,16 @@ export const paymentAgreements = pgTable('payment_agreements', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow()
 });
+
+export const pastWorks = pgTable('past_works', {
+  id: serial('id').primaryKey(),
+  providerId: integer('provider_id').notNull().references(() => providers.id),
+  imageUrl: varchar('image_url', { length: 500 }).notNull(),
+  description: text('description').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
 // Define all relations
 export const authenticationRelations = relations(Authentication, ({ one }) => ({
     user: one(users, {
@@ -197,6 +207,7 @@ export const providerRelations = relations(providers, ({ many, one }) => ({
   services: many(providerServices),
   bids: many(bids),
   interests: many(interests),
+  pastWorks: many(pastWorks), 
 }));
 
 export const collegeRelations = relations(colleges, ({ many }) => ({
@@ -273,6 +284,14 @@ export const interestsRelations = relations(interests, ({ one }) => ({
     references: [providers.id],
   }),
 }));
+
+export const pastWorksRelations = relations(pastWorks, ({ one }) => ({
+  provider: one(providers, {
+    fields: [pastWorks.providerId],
+    references: [providers.id],
+  }),
+}));
+
 // Export types for TypeScript support
 export type TIUsers = typeof users.$inferInsert;
 export type TSUsers = typeof users.$inferSelect;

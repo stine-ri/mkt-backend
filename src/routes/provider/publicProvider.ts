@@ -73,6 +73,7 @@ publicProviderRoutes.get('/:id', (c, next) => next(), async (c: Context<CustomCo
             service: true,
           },
         },
+        pastWorks: true,
       },
     });
 
@@ -94,7 +95,8 @@ publicProviderRoutes.get('/:id', (c, next) => next(), async (c: Context<CustomCo
         rating: provider.rating,
         completedRequests: provider.completedRequests,
         profileImageUrl: provider.profileImageUrl,
-        bio: provider.bio
+        bio: provider.bio,
+         pastWorks: provider.pastWorks || [],
       }
     });
 
