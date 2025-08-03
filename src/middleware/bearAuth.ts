@@ -59,6 +59,7 @@ export const authMiddleware = async (c: Context<CustomContext>, next: Next) => {
         id: decoded.id,
         email: decoded.email,
         role: decoded.role,
+         name: decoded.name 
       });
       console.log('Token verified successfully');
     } catch (error) {

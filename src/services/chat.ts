@@ -168,7 +168,7 @@ app.post('/:roomId/messages', async (c) => {
       chatRoomId: roomId,
       sender: {
         id: userId,
-        name: user.name,
+        name: user.name ?? 'Unknown',
         avatar: user.avatar
       },
       message: {

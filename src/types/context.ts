@@ -3,7 +3,7 @@ export type JwtPayload = {
   id: string;
   email: string;
   role: 'admin' | 'client' | 'service_provider';
-  name: string;    
+  name?: string;    
   avatar?: string | null;
 };
 
