@@ -206,17 +206,24 @@ app.get('/', async (c: Context<CustomContext>) => {
     });
 
     // Format location field from formatted_location
-    const formattedResults = results.rows.map(row => ({
-      ...row,
-      location: row.formatted_location 
-        ? row.formatted_location 
-        : row.location 
-          ? typeof row.location === 'object' 
-            ? row.location 
-            : tryParseJson(row.location)
-          : null
-    }));
+ const formattedResults = results.rows.map(row => {
+  let location;
 
+  if (row.formatted_location) {
+    location = row.formatted_location;
+  } else if (row.location) {
+    location = typeof row.location === 'object'
+      ? row.location
+      : tryParseJson(row.location);
+  } else {
+    location = null;
+  }
+
+  return {
+    ...row,
+    location,
+  };
+});
     return c.json(formattedResults);
 
   } catch (dbError) {
