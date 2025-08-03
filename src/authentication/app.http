@@ -161,7 +161,3 @@ Content-Type: application/json
     "email": "kmutai@gmail.com",
     "password": "2001km"
   }
-###
-curl -X GET http://localhost:3000/api/provider/requests \
-  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjgiLCJlbWFpbCI6ImttdXRhaUBnbWFpbC5jb20iLCJyb2xlIjoic2VydmljZV9wcm92aWRlciJ9.X_DH-T8rmr_HZRCQwYEnstblZohcY-Tc7M5b2DtatdM" \
-  -H "Content-Type: application/json"
