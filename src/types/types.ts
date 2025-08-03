@@ -33,6 +33,36 @@ export interface Notification {
   relatedId?: number;
   createdAt: Date;
 }
+export interface NotificationPayload {
+  type: string;
+  message?: string | {
+    id: number;
+    content: string;
+    createdAt: Date;
+  };
+  requestId?: number;
+  relatedEntityId?: number;
+  chatRoomId?: number;
+  isRead?: boolean;
+  reason?: string;
+  userId?: number; 
+  client?: {
+    id: number;
+    name?: string;
+    avatar?: string | null;
+  };
+  sender?: {
+    id: number;
+    name: string;
+    avatar?: string | null;
+  };
+   agreement?: {
+    id: number;
+    amount: number;
+    paymentMethod: string;
+  };
+}
+
 
 export interface Service {
   id: number;

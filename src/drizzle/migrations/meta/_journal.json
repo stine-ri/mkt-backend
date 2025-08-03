@@ -71,6 +71,13 @@
       "when": 1753814903721,
       "tag": "0009_harsh_junta",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1754210228477,
+      "tag": "0010_wandering_earthquake",
+      "breakpoints": true
     }
   ]
 }

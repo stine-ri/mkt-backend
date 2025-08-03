@@ -1,146 +1,172 @@
 // services/interests.ts
 import { Hono } from 'hono';
 import { db } from '../../drizzle/db.js';
-import { interests, requests, providers } from '../../drizzle/schema.js';
-import { eq, and } from 'drizzle-orm';
+import { interests, requests, providers, users,  chatRooms } from '../../drizzle/schema.js';
+import { eq, and, count, exists } from 'drizzle-orm';
 import type { CustomContext } from '../../types/context.js';
+import { notifyUser } from '../../lib/notification.js';
+import {  sendRealTimeNotification} from '../../websocket.js';
 
 const app = new Hono<CustomContext>();
 
-// Express interest
+// Express interest with enhanced validation
 app.post('/:requestId', async (c) => {
   try {
     const requestId = Number(c.req.param('requestId'));
     const user = c.get('user');
 
-    // 1. Verify provider exists first
+    // Verify provider exists with more details
     const provider = await db.query.providers.findFirst({
-      where: eq(providers.userId, Number(user.id))
+      where: eq(providers.userId, Number(user.id)),
+      with: {
+        user: true // Include user details for notification
+      }
     });
 
-    // Consider adding more context to the 404 responses
     if (!provider) {
       return c.json({ 
         error: "Provider profile not found",
-        solution: "Please complete your provider profile first"
+        solution: "Please complete your provider profile first",
+        docs: "/docs/providers/setup" // Add helpful links
       }, 404);
     }
 
-    // 2. Then proceed with existing checks
+    // Check request with more details
     const request = await db.query.requests.findFirst({
       where: and(
         eq(requests.id, requestId),
         eq(requests.allowInterests, true)
-      )
+      ),
+      with: {
+        user: true // Include client for notification
+      }
     });
 
     if (!request) {
       return c.json({ 
         error: "Request not available",
-        solution: "This request may have been closed or does not accept interests"
+        details: {
+          possibleReasons: [
+            "Request closed",
+            "Doesn't accept interests",
+            "Doesn't exist"
+          ]
+        }
       }, 404);
     }
 
+    // Check existing interest
     const existingInterest = await db.query.interests.findFirst({
       where: and(
         eq(interests.requestId, requestId),
-        eq(interests.providerId, provider.id) // Use provider.id not user.id
+        eq(interests.providerId, provider.id)
       )
     });
 
-    // Add more detailed conflict message
     if (existingInterest) {
       return c.json({ 
         error: "Interest already exists",
-        existingInterestId: existingInterest.id // Helps with debugging
+        existingInterest: {
+          id: existingInterest.id,
+          createdAt: existingInterest.createdAt
+        },
+        action: "Consider withdrawing the existing interest first"
       }, 409);
     }
 
-    // 3. Create interest with validated provider.id
+    // Create interest
     const [newInterest] = await db.insert(interests).values({
       requestId,
       providerId: provider.id,
-      createdAt: new Date()
+      createdAt: new Date(),
+      status: 'pending' // Add status field
     }).returning();
 
-    return c.json(newInterest, 201);
+    // Notify client
+if (request.user) {
+  const savedNotification = await notifyUser(request.user.id, {
+    userId: request.user.id,
+    type: 'new_interest',
+    message: `${provider.user?.full_name || 'A provider'} showed interest in your request.`,
+    relatedEntityId: request.id // or requestId if that's your intended use
+  });
+
+  // ✅ Send via WebSocket using imported helper
+  sendRealTimeNotification(request.user.id, {
+    ...savedNotification,
+    provider: {
+      id: provider.id,
+      name: provider.user?.full_name || 'Provider',
+      avatar: provider.user?.avatar || null
+    }
+  });
+}
+
+return c.json(newInterest, 201);
+
 
   } catch (error) {
-    // Add timestamp to error logs for debugging
     console.error(`[${new Date().toISOString()}] Error:`, error);
     return c.json({ 
       error: "Internal server error",
-      details: error instanceof Error ? error.message : 'Unknown error'
+      requestId: "Include this in support tickets",
+      timestamp: new Date().toISOString()
     }, 500);
   }
 });
 
-// Get interests for a request
+// Get interests for a request with pagination
 app.get('/request/:requestId', async (c) => {
-  const requestId = c.req.param('requestId');
-const result = await db.query.interests.findMany({
-  where: eq(interests.requestId, Number(requestId)),
-  with: {
-    provider: true
+  try {
+    const requestId = Number(c.req.param('requestId'));
+    const page = Number(c.req.query('page')) || 1;
+    const limit = Number(c.req.query('limit')) || 10;
+
+    const result = await db.query.interests.findMany({
+      where: eq(interests.requestId, requestId),
+      with: {
+        provider: {
+          with: {
+            user: {
+              columns: {
+                id: true,
+                full_name: true,
+                avatar: true
+              }
+            }
+          }
+        }
+      },
+      limit,
+      offset: (page - 1) * limit,
+      orderBy: (interests, { desc }) => [desc(interests.createdAt)]
+    });
+
+    const total = await db.select({ count: count() })
+      .from(interests)
+      .where(eq(interests.requestId, requestId));
+
+    return c.json({
+      data: result,
+      meta: {
+        total: total[0].count,
+        page,
+        limit,
+        totalPages: Math.ceil(total[0].count / limit)
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching interests:', error);
+    return c.json({ error: 'Failed to fetch interests' }, 500);
   }
 });
-return c.json(result);
 
-});
-// Get interests for the logged-in provider
+// Get my interests with filters
 app.get('/my', async (c) => {
   try {
     const user = c.get('user');
-    const userId = Number(user.id);
+    const { status, page = 1, limit = 10 } = c.req.query();
 
-    // Find provider profile
-    const provider = await db.query.providers.findFirst({
-      where: eq(providers.userId, userId)
-    });
-
-    if (!provider) {
-      return c.json({ error: 'Provider profile not found' }, 404);
-    }
-
-    // Fetch interests with request data
-    const result = await db.query.interests.findMany({
-      where: eq(interests.providerId, provider.id),
-      with: {
-        request: {
-          with: {
-            service: true, // Include service details if needed
-            user: true    // Include user details if needed
-          }
-        },
-      }
-    });
-
-    return c.json(result);
-    
-  } catch (error) {
-  console.error('Error fetching interests:', error);
-
-  if (error instanceof Error) {
-    return c.json({ 
-      error: 'Failed to fetch interests',
-      details: error.message 
-    }, 500);
-  }
-
-  return c.json({
-    error: 'Failed to fetch interests',
-    details: 'An unknown error occurred'
-  }, 500);
-}
-});
-
-// Delete an interest
-app.delete('/:interestId', async (c) => {
-  try {
-    const interestId = Number(c.req.param('interestId'));
-    const user = c.get('user');
-
-    // Get the provider
     const provider = await db.query.providers.findFirst({
       where: eq(providers.userId, Number(user.id))
     });
@@ -149,32 +175,263 @@ app.delete('/:interestId', async (c) => {
       return c.json({ error: 'Provider profile not found' }, 404);
     }
 
-    // Check if the interest belongs to the provider
+    const whereClause = status 
+      ? and(
+          eq(interests.providerId, provider.id),
+          eq(interests.status, status)
+        )
+      : eq(interests.providerId, provider.id);
+
+    const result = await db.query.interests.findMany({
+      where: whereClause,
+      with: {
+        request: {
+          with: {
+            service: true,
+            user: {
+              columns: {
+                id: true,
+                full_name: true,
+                avatar: true
+              }
+            }
+          }
+        }
+      },
+      limit: Number(limit),
+      offset: (Number(page) - 1) * Number(limit),
+      orderBy: (interests, { desc }) => [desc(interests.createdAt)]
+    });
+
+    const total = await db.select({ count: count() })
+      .from(interests)
+      .where(whereClause);
+
+    return c.json({
+      data: result,
+      meta: {
+        total: total[0].count,
+        page: Number(page),
+        limit: Number(limit),
+        totalPages: Math.ceil(total[0].count / Number(limit))
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching interests:', error);
+    return c.json({ error: 'Failed to fetch interests' }, 500);
+  }
+});
+
+// Withdraw interest with enhanced checks
+app.delete('/:interestId', async (c) => {
+  try {
+    const interestId = Number(c.req.param('interestId'));
+    const user = c.get('user');
+
+    // 1. Get the provider based on the logged-in user
+    const provider = await db.query.providers.findFirst({
+      where: eq(providers.userId, Number(user.id)),
+      with: {
+        user: true
+      }
+    });
+
+    if (!provider) {
+      return c.json({ error: 'Provider profile not found' }, 404);
+    }
+
+    // 2. Get the interest
     const interest = await db.query.interests.findFirst({
       where: and(
         eq(interests.id, interestId),
         eq(interests.providerId, provider.id)
-      )
+      ),
+      with: {
+        request: {
+          with: {
+            user: true
+          }
+        }
+      }
+    });
+
+    if (!interest) {
+      return c.json({ 
+        error: 'Interest not found or unauthorized',
+        possibleReasons: [
+          'Already withdrawn',
+          'Does not belong to you',
+          'Request closed'
+        ]
+      }, 404);
+    }
+
+    // 3. Ensure it's not accepted
+    if (interest.status === 'accepted') {
+      return c.json({ 
+        error: 'Cannot withdraw accepted interest',
+        solution: 'Contact the client directly'
+      }, 400);
+    }
+
+    // 4. Delete the interest
+    await db.delete(interests).where(eq(interests.id, interestId));
+
+    // 5. Notify the client
+    if (interest.request?.user?.id && interest.request?.id) {
+      await notifyUser(
+        interest.request.user.id,
+        {
+          userId: interest.request.user.id,
+          type: 'interest_withdrawn',
+          message: `${provider.user?.full_name || 'A provider'} has withdrawn interest in your request.`,
+          relatedEntityId: interest.request.id
+        }
+      );
+    }
+
+    return c.json({ 
+      message: 'Interest withdrawn successfully',
+      withdrawnAt: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Delete Interest Error:', error);
+    return c.json({
+      error: 'Failed to withdraw interest',
+      support: "contact@support.com"
+    }, 500);
+  }
+});
+
+
+// Add endpoints for client to accept/reject interests
+app.post('/:interestId/accept', async (c) => {
+  try {
+    const interestId = Number(c.req.param('interestId'));
+    const user = c.get('user');
+
+    // Verify interest exists and belongs to client's request
+    const interest = await db.query.interests.findFirst({
+      where: and(
+        eq(interests.id, interestId),
+        // Join with request to verify ownership
+        exists(
+          db.select()
+            .from(requests)
+            .where(and(
+              eq(requests.id, interests.requestId),
+              eq(requests.userId, Number(user.id))
+            ))
+        )
+      ),
+      with: {
+        provider: {
+          with: {
+            user: true
+          }
+        },
+        request: true
+      }
     });
 
     if (!interest) {
       return c.json({ error: 'Interest not found or unauthorized' }, 404);
     }
 
-    // Delete the interest
-    await db.delete(interests).where(eq(interests.id, interestId));
+    // Update interest status
+    await db.update(interests)
+      .set({ status: 'accepted' })
+      .where(eq(interests.id, interestId));
 
-    return c.json({ message: 'Interest deleted successfully' });
+    // Create chat room
+const [chatRoom] = await db.insert(chatRooms).values({
+  requestId: interest.requestId as number,
+  providerId: interest.providerId as number,
+  clientId: Number(user.id) as number,
+}).returning();
+
+// Notify provider
+if (interest.provider?.user) {
+  await notifyUser(interest.provider.user.id, {
+    type: 'interest_accepted',
+    requestId: interest.requestId ?? undefined,
+    chatRoomId: chatRoom.id,
+    isRead: false, // ✅ Required field
+    client: {
+      id: Number(user.id),
+      name: user.name,
+      avatar: user.avatar
+    }
+  });
+}
+
+
+
+    return c.json({ 
+      message: 'Interest accepted successfully',
+      chatRoomId: chatRoom.id
+    });
 
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] Delete Interest Error:`, error);
-    return c.json({
-      error: 'Failed to delete interest',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    }, 500);
+    console.error('Error accepting interest:', error);
+    return c.json({ error: 'Failed to accept interest' }, 500);
+  }
+});
+
+app.post('/:interestId/reject', async (c) => {
+  try {
+    const interestId = Number(c.req.param('interestId'));
+    const user = c.get('user');
+
+   const interest = await db.query.interests.findFirst({
+  where: and(
+    eq(interests.id, interestId),
+    exists(
+      db.select()
+        .from(requests)
+        .where(
+          and(
+            eq(requests.id, interests.requestId),
+            eq(requests.userId, Number(user.id))
+          )
+        )
+    )
+  ),
+  with: {
+    provider: {
+      with: {
+        user: true
+      }
+    }
   }
 });
 
 
+    if (!interest) {
+      return c.json({ error: 'Interest not found or unauthorized' }, 404);
+    }
+
+    await db.update(interests)
+      .set({ status: 'rejected' })
+      .where(eq(interests.id, interestId));
+
+    // Notify provider
+if (interest.provider?.user && interest.requestId !== null) {
+  await notifyUser(interest.provider.user.id, {
+    type: 'interest_rejected',
+    requestId: interest.requestId,
+    reason: 'Client declined your interest'
+  });
+}
+
+
+    return c.json({ message: 'Interest rejected successfully' });
+
+  } catch (error) {
+    console.error('Error rejecting interest:', error);
+    return c.json({ error: 'Failed to reject interest' }, 500);
+  }
+});
 
 export default app;

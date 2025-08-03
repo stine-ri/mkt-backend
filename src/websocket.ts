@@ -1,70 +1,99 @@
-// websocket.ts
-import { WebSocketServer } from 'ws';
+import { WebSocketServer, WebSocket } from 'ws';
 import { verify } from 'hono/jwt';
 import { db } from './drizzle/db.js';
 import { notifications } from './drizzle/schema.js';
 import { and, eq } from 'drizzle-orm';
-import { JwtPayload } from './types/context.js'; 
+import type { JwtPayload } from './types/context.js';
 
 interface WebSocketUser {
   userId: number;
   role: string;
+  roomId?: number;
 }
 
 const wss = new WebSocketServer({ port: 8081 });
+const userClients = new Map<number, WebSocket>();
 
-
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
   ws.on('message', async (message) => {
     try {
       const data = JSON.parse(message.toString());
-      
+
+      // 🔐 Handle initial auth with JWT
       if (data.type === 'auth') {
         const secret = process.env.JWT_SECRET;
         if (!secret) {
           console.error('JWT_SECRET is not set');
           return;
         }
-        // Verify JWT token
+
         const payload = await verify(data.token, secret) as JwtPayload;
-        
-        if (payload && payload.id && payload.role) {
-          (ws as any).user = {
-            userId: parseInt(payload.id),
-            role: payload.role
-          };
-          
-          // Send any unread notifications
-          const unreadNotifications = await db
+
+        if (payload?.id && payload.role) {
+          const userId = parseInt(payload.id);
+          const userInfo: WebSocketUser = { userId, role: payload.role };
+          (ws as any).user = userInfo;
+          userClients.set(userId, ws);
+
+          // 🟢 Send unread notifications
+          const unread = await db
             .select()
             .from(notifications)
-            .where(
-              and(
-                eq(notifications.userId, parseInt(payload.id)),
-                eq(notifications.isRead, false)
-              )
-            );
-            
+            .where(and(
+              eq(notifications.userId, userId),
+              eq(notifications.isRead, false)
+            ));
+
           ws.send(JSON.stringify({
             type: 'initial_notifications',
-            data: unreadNotifications
+            data: unread
           }));
+
+          // ✅ Mark as read in DB
+          await db.update(notifications)
+            .set({ isRead: true })
+            .where(eq(notifications.userId, userId));
         }
       }
-    } catch (error) {
-      console.error('WebSocket error:', error);
+
+      // 🟣 Handle joining a room
+      if (data.type === 'join_room' && (ws as any).user) {
+        (ws as any).user.roomId = data.roomId;
+      }
+
+    } catch (err) {
+      console.error('WebSocket error:', err);
+    }
+  });
+
+  ws.on('close', () => {
+    const user = (ws as any).user as WebSocketUser | undefined;
+    if (user?.userId) {
+      userClients.delete(user.userId);
     }
   });
 });
 
-// Function to send real-time notification
+
+// 🔔 Send notification to specific user
 export function sendRealTimeNotification(userId: number, notification: any) {
+  const client = userClients.get(userId);
+  if (client) {
+    client.send(JSON.stringify({
+      type: 'notification',
+      data: notification
+    }));
+  }
+}
+
+// 📢 Broadcast to a room (e.g., chat messages)
+export function broadcastToRoom(roomId: number, message: any) {
   wss.clients.forEach((client) => {
-    const wsUser = (client as any).user as WebSocketUser | undefined;
-    if (wsUser && wsUser.userId === userId) {
+    const user = (client as any).user as WebSocketUser | undefined;
+    if (user?.roomId === roomId) {
       client.send(JSON.stringify({
-        type: 'notification',
-        data: notification
+        type: 'room_message',
+        data: message
       }));
     }
   });

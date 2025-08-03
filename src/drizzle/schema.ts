@@ -26,6 +26,7 @@ export const roleEnum = pgEnum("role", ["admin", "service_provider", "client"]);
     email: varchar("email", { length: 255 }).unique().notNull(),
     contact_phone: varchar("contact_phone", { length: 20 }),
     address: text("address"),
+  avatar: varchar('avatar', { length: 255 }), 
     role: roleEnum("role").default("client").notNull(),
     created_at: timestamp("created_at").defaultNow(),
     updated_at: timestamp("updated_at").defaultNow(),
@@ -122,6 +123,7 @@ export const notifications = pgTable('notifications', {
   type: varchar('type', { length: 50 }).notNull(),
   message: text('message').notNull(),
   relatedEntityId: integer('related_entity_id'),
+  requestId: integer('request_id'),
   isRead: boolean('is_read').default(false),
   createdAt: timestamp('created_at').defaultNow(),
 });
@@ -134,8 +136,40 @@ export const interests = pgTable('interests', {
   createdAt: timestamp('created_at').defaultNow(),
   message: text('message'),
   isShortlisted: boolean('is_shortlisted').default(false),
+  status: text('status').default('pending').notNull(),
 });
 
+export const chatRooms = pgTable('chat_rooms', {
+  id: serial('id').primaryKey(),
+  requestId: integer('request_id').notNull().references(() => requests.id),
+  clientId: integer('client_id').notNull().references(() => users.id),
+  providerId: integer('provider_id').notNull().references(() => users.id),
+  status: text('status').notNull().default('active'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+
+export const messages = pgTable('messages', {
+  id: serial('id').primaryKey(),
+  chatRoomId: integer('chat_room_id').notNull().references(() => chatRooms.id),
+  senderId: integer('sender_id').notNull().references(() => users.id),
+  content: text('content').notNull(),
+  isSystem: boolean('is_system').notNull().default(false),
+  read: boolean('read').notNull().default(false),
+  createdAt: timestamp('created_at').notNull().defaultNow()
+});
+
+export const paymentAgreements = pgTable('payment_agreements', {
+  id: serial('id').primaryKey(),
+  chatRoomId: integer('chat_room_id').notNull().references(() => chatRooms.id),
+  amount: decimal('amount', { precision: 10, scale: 2 }).notNull(),
+  paymentMethod: text('payment_method').notNull(),
+  terms: text('terms'),
+  status: text('status').notNull().default('pending'), // pending, accepted, completed
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow()
+});
 // Define all relations
 export const authenticationRelations = relations(Authentication, ({ one }) => ({
     user: one(users, {

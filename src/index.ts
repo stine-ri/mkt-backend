@@ -16,6 +16,8 @@ import { authMiddleware } from './middleware/bearAuth.js';
 import interestRoutes from './routes/provider/interests.js'
 import { db } from './drizzle/db.js';
 import publicProviderRoutes from './routes/provider/publicProvider.js';
+import interests from './routes/provider/interests.js';
+import chat from './services/chat.js';
 import { eq, and, or, gte, lte, inArray } from 'drizzle-orm';
 import * as schema from './drizzle/schema.js';
 import './websocket.js';
@@ -178,6 +180,8 @@ app.route('/api/client', clientRoutes);  // Fixed: added leading slash
 app.route('/', serviceRoutes);
 app.route('/', profileUploadHandler);
 app.route('api/interests', interestRoutes);
+app.route('/api/interests', interests);
+app.route('/api/chat', chat);
 // Mount public provider routes
 app.route('/api/provider/public', publicProviderRoutes);
 // PROTECTED Admin endpoints (CREATE/UPDATE/DELETE operations)

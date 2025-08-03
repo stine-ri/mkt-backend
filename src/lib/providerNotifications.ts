@@ -7,7 +7,7 @@ import {
   providerServices,
 } from '../drizzle/schema.js';
 import { and, eq, sql } from 'drizzle-orm';
-import { sendNotification } from './notification.js';
+import sendNotification from './notification.js';
 
 // Manually extend request type to include optional latitude and longitude
 export async function notifyNearbyProviders(
@@ -69,7 +69,6 @@ export async function notifyNearbyProviders(
     const providerData = provider.providers;
 
     await sendNotification(providerData.userId, {
-      userId: providerData.userId,
       type: 'new_request',
       message: `New ${request.isService ? 'service' : 'product'} request matching your profile`,
       relatedEntityId: request.id,
