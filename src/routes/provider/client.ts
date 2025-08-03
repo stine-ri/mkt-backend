@@ -90,8 +90,6 @@ const clientRequests: RequestWithRelations[] = rawRequests.map((req) => ({
   return c.json(formatted);
 });
 
-
-
 // POST /bids - client sends a bid to a provider
 // Add this to your bids route file
 app.post('/', async (c) => {
