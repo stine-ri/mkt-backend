@@ -56,19 +56,39 @@ if (typeof providerId !== 'number') {
 app.post('/', async (c) => {
   const providerId = c.get('user').providerId;
   if (typeof providerId !== 'number') {
-  return c.json({ error: 'Invalid provider ID' }, 400);
-}
+    return c.json({ error: 'Invalid provider ID' }, 400);
+  }
+
   const formData = await c.req.formData();
 
-  const name = formData.get('name') as string;
-  const description = formData.get('description') as string;
-  const price = formData.get('price') as string;
-  const category = formData.get('category') as string;
-  const stock = formData.get('stock') as string;
+  // Validate required fields
+  const name = formData.get('name')?.toString().trim();
+  const description = formData.get('description')?.toString().trim();
+  const price = formData.get('price')?.toString();
+  const category = formData.get('category')?.toString().trim();
+  const stock = formData.get('stock')?.toString().trim();
   const imageFiles = formData.getAll('images') as File[];
 
   if (!name || !description || !price || !category) {
-    return c.json({ error: 'Missing required fields' }, 400);
+    return c.json({ 
+      error: 'Missing required fields',
+      details: {
+        name: !name ? 'Product name is required' : undefined,
+        description: !description ? 'Description is required' : undefined,
+        price: !price ? 'Price is required' : undefined,
+        category: !category ? 'Category is required' : undefined
+      }
+    }, 400);
+  }
+
+  // Validate price is a valid number
+  const priceNum = parseFloat(price);
+  if (isNaN(priceNum)) {
+    return c.json({ error: 'Price must be a valid number' }, 400);
+  }
+
+  if (imageFiles.length === 0) {
+    return c.json({ error: 'At least one image is required' }, 400);
   }
 
   try {
@@ -78,7 +98,7 @@ app.post('/', async (c) => {
         providerId,
         name,
         description,
-        price,
+        price: price, // Pass as string - drizzle will handle numeric conversion
         category,
         stock: stock ? parseInt(stock) : null,
         status: 'draft',
