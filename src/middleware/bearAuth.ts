@@ -20,6 +20,7 @@ export const authMiddleware = async (c: Context<CustomContext>, next: Next) => {
     '/api/services',
     '/api/colleges',
     '/api/login',
+     '/uploads/',
    '/api/register',
    '/api/provider/public',
     '/health',  // Health check route
