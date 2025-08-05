@@ -1,8 +1,9 @@
 // src/routes/client.ts
 import { Hono } from 'hono';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, desc } from 'drizzle-orm';
 import { InferSelectModel } from 'drizzle-orm';
 import { db } from '../../drizzle/db.js';
+import { TSRequestsWithRelations, TSRequests,TSInterests, TSProviders } from '../../drizzle/schema.js';
 import { drizzle } from 'drizzle-orm/node-postgres';
 
 import {
@@ -30,64 +31,272 @@ type RequestWithRelations = Request & {
   college?: College;
   bids?: Bid[];
 };
+// Fixed request handler
+// Helper type for the query result
+type QueryResult = {
+  id: number;
+  userId: number | null;
+  serviceId: number | null;
+  productName: string | null;
+  isService: boolean;
+  description: string | null;
+  desiredPrice: number;
+  location: string;
+  collegeFilterId: number | null;
+   status: "open" | "closed" | "pending" | null;
+  allowInterests: boolean | null;
+  allowBids: boolean | null;
+  accepted_bid_id: number | null;
+  createdAt: Date | null;
+  service?: {
+    id: number;
+    name: string;
+    category: string | null;
+    description: string | null;
+    createdAt: Date | null;
+  } | null;
+  college?: {
+    id: number;
+    name: string;
+    location: string | null;
+    createdAt: Date | null;
+  } | null;
+  bids?: Array<{
+    id: number;
+    userId: number | null;
+    requestId: number;
+    providerId: number | null;
+    price: number;
+    message: string | null;
+    status: "pending" | "accepted" | "rejected" | null;
+    isGraduateOfRequestedCollege: boolean;
+    createdAt: Date | null;
+  }>;
+  interests?: Array<{
+    id: number;
+    requestId: number | null;
+    providerId: number | null;
+    message: string | null;
+    status: string;
+    isShortlisted: boolean | null;
+    createdAt: Date | null;
+    provider?: {
+      id: number;
+      userId: number;
+      firstName: string;
+      lastName: string;
+      phoneNumber: string;
+      collegeId: number | null;
+      latitude: string | null;
+      longitude: string | null;
+      address: string | null;
+      bio: string | null;
+      isProfileComplete: boolean | null;
+      rating: number | null;
+      completedRequests: number | null;
+      profileImageUrl: string | null;
+      createdAt: Date | null;
+      updatedAt: Date | null;
+      user?: {
+        id: number;
+        full_name: string;
+        email: string;
+        contact_phone: string | null;
+        address: string | null;
+        avatar: string | null;
+        role: "admin" | "service_provider" | "client";
+        created_at: Date | null;
+        updated_at: Date | null;
+      } | null;
+    } | null;
+  }>;
+};
 
+// Fixed request handler
 app.get('/requests', async (c) => {
   const user = c.get('user');
   const userId = Number(user.id);
+  const includeParam = c.req.query('include') || '';
 
   if (isNaN(userId)) {
     return c.json({ error: 'Invalid user ID' }, 400);
   }
 
-const rawRequests = await db.query.requests.findMany({
-  where: eq(requests.userId, userId),
-  with: {
-    service: true,
-    college: true,
-    bids: true,
-  },
-  orderBy: (requests, { desc }) => [desc(requests.createdAt)],
-});
+  try {
+    // Build the query with proper typing
+    const queryOptions = {
+      where: eq(requests.userId, userId),
+      orderBy: [desc(requests.createdAt)],
+      with: {
+        service: {
+          columns: {
+            id: true,
+            name: true,
+            category: true,
+            description: true,
+            createdAt: true // Include this required field
+          }
+        },
+        college: {
+          columns: {
+            id: true,
+            name: true,
+            location: true, // Include this required field
+            createdAt: true // Include this required field
+          }
+        },
+        bids: {
+          columns: {
+            id: true,
+            userId: true, // Include this required field
+            requestId: true,
+            providerId: true,
+            price: true,
+            message: true,
+            status: true,
+            isGraduateOfRequestedCollege: true, // Include this required field
+            createdAt: true
+          }
+        },
+        ...(includeParam.includes('interests') && {
+          interests: {
+            columns: {
+              id: true,
+              requestId: true,
+              providerId: true,
+              message: true,
+              status: true,
+              isShortlisted: true,
+              createdAt: true
+            },
+            with: {
+              provider: {
+                columns: {
+                  id: true,
+                  userId: true,
+                  firstName: true,
+                  lastName: true,
+                  phoneNumber: true,
+                  collegeId: true,
+                  latitude: true,
+                  longitude: true,
+                  address: true,
+                  bio: true,
+                  isProfileComplete: true,
+                  rating: true,
+                  completedRequests: true,
+                  profileImageUrl: true,
+                  createdAt: true,
+                  updatedAt: true
+                },
+                with: {
+                  user: {
+                    columns: {
+                      id: true,
+                      full_name: true,
+                      email: true,
+                       contact_phone: true, 
+                       address: true,
+                      avatar: true,
+                      role: true,
+                      created_at: true,    // Added missing field
+                      updated_at: true 
+                    }
+                  }
+                }
+              }
+            }
+          }
+        })
+      }
+    };
 
-const clientRequests: RequestWithRelations[] = rawRequests.map((req) => ({
-  ...req,
-  service: req.service ?? undefined,
-  college: req.college ?? undefined,
-  bids: req.bids ?? [],
-}));
+    const rawRequests = await db.query.requests.findMany(queryOptions) as QueryResult[];
 
+    // Type the response with proper typing
+    const formatted: TSRequestsWithRelations[] = rawRequests.map((r) => {
+      // Extended properties with relations
+      const extendedRequest: TSRequestsWithRelations = {
+        // Base request properties
+        id: r.id,
+        userId: r.userId,
+        description: r.description,
+        createdAt: r.createdAt,
+        serviceId: r.serviceId,
+        productName: r.productName,
+        isService: r.isService,
+        desiredPrice: r.desiredPrice,
+        location: r.location,
+        collegeFilterId: r.collegeFilterId,
+          status: r.status as "open" | "closed" | "pending" | null,
+        allowInterests: r.allowInterests,
+        allowBids: r.allowBids,
+        accepted_bid_id: r.accepted_bid_id,
+        
+        // Add computed fields - these are safe to add
+        budget: r.desiredPrice,
+        title: r.productName || (r.service?.name ?? '') || '',
+        category: r.service?.category || '',
+        serviceName: r.service?.name || '',
+        created_at: r.createdAt,
+        
+        // Add relations - directly assign since we know the structure
+        service: r.service || null,
+        college: r.college || null,
+          bids: (r.bids || []).map(bid => ({
+          ...bid,
+          status: bid.status as "pending" | "accepted" | "rejected" | null
+        })),
+        interests: (r.interests || []).map(i => ({
+          id: i.id,
+          requestId: i.requestId,
+          providerId: i.providerId,
+          message: i.message,
+          status: i.status,
+          isShortlisted: i.isShortlisted,
+          createdAt: i.createdAt,
+      provider: i.provider ? {
+  id: i.provider.id,
+  userId: i.provider.userId,
+  firstName: i.provider.firstName,
+  lastName: i.provider.lastName,
+  phoneNumber: i.provider.phoneNumber,
+  collegeId: i.provider.collegeId,
+  latitude: i.provider.latitude,
+  longitude: i.provider.longitude,
+  address: i.provider.address,
+  bio: i.provider.bio,
+  isProfileComplete: i.provider.isProfileComplete,
+  rating: i.provider.rating,
+  completedRequests: i.provider.completedRequests,
+  profileImageUrl: i.provider.profileImageUrl,
+  createdAt: i.provider.createdAt,
+  updatedAt: i.provider.updatedAt,
+  user: i.provider.user ? {
+    id: i.provider.user.id,
+    full_name: i.provider.user.full_name,
+    email: i.provider.user.email,
+    contact_phone: i.provider.user.contact_phone,
+    address: i.provider.user.address,
+    avatar: i.provider.user.avatar,
+    role: ['admin', 'service_provider', 'client'].includes(i.provider.user.role)
+      ? i.provider.user.role as "admin" | "service_provider" | "client"
+      : 'client',
+    created_at: i.provider.user.created_at,
+    updated_at: i.provider.user.updated_at
+  } : null
+} : null
+        }))
+      };
 
-  const formatted = clientRequests.map((r) => ({
-    id: r.id,
-    userId: r.userId,
-    serviceId: r.serviceId,
-    productName: r.productName,
-    isService: r.isService,
-    description: r.description,
-    desiredPrice: r.desiredPrice,
-    budget: r.desiredPrice,
-    title: r.productName || r.service?.name || '',
-    category: r.service?.category || '',
-    location: typeof r.location === 'string' ? r.location : JSON.stringify(r.location),
-    latitude: null,
-    longitude: null,
-    serviceName: r.service?.name || '',
-    subcategory: null,
-    urgency: null,
-    preferredTime: null,
-    specialRequirements: null,
-    notes: null,
-    collegeFilterId: r.collegeFilterId,
-    college: r.college ? {
-      id: r.college.id,
-      name: r.college.name,
-    } : null,
-    status: r.status,
-    created_at: r.createdAt,
-    bids: r.bids ?? [],
-  }));
+      return extendedRequest;
+    });
 
-  return c.json(formatted);
+    return c.json(formatted);
+  } catch (error) {
+    console.error('Error fetching requests:', error);
+    return c.json({ error: 'Failed to fetch requests' }, 500);
+  }
 });
 
 // POST /bids - client sends a bid to a provider

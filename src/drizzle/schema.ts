@@ -319,3 +319,23 @@ export type TSServices = typeof services.$inferSelect;
 
 export type TINotifications = typeof notifications.$inferInsert;
 export type TSNotifications = typeof notifications.$inferSelect;
+
+// Extend the base request type to include relations
+export type TSRequestsWithRelations = TSRequests & {
+  // Computed fields
+  budget?: number;
+  title?: string;
+  category?: string;
+  serviceName?: string;
+  created_at?: Date | null;
+  
+  // Relations
+  service?: TSServices | null;
+  college?: TSColleges | null;
+  bids?: TSBids[];
+  interests?: (TSInterests & {
+    provider?: TSProviders & {
+      user?: TSUsers | null;
+    } | null;
+  })[];
+};
