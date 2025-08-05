@@ -6,9 +6,7 @@ import type { Context } from 'hono';
 
 export async function uploadFile(file: File, userPath: string, c: Context): Promise<string> {
   // Validate input
-  if (!file || !userPath) {
-    throw new Error('Invalid file or user path');
-  }
+  if (!file || !userPath) throw new Error('Invalid file or user path');
 
   // Create safe filename
   const timestamp = Date.now();
@@ -16,25 +14,33 @@ export async function uploadFile(file: File, userPath: string, c: Context): Prom
   const extension = path.extname(file.name).toLowerCase();
   const fileName = `${timestamp}-${originalName}${extension}`;
 
-  // Define paths
-  const serverPath = `uploads/${userPath}`;
-  const publicPath = `/uploads/${userPath}/${fileName}`;
-  const uploadDir = path.join(process.cwd(), serverPath);
-  const fullFilePath = path.join(uploadDir, fileName);
+  // Define paths - CRITICAL FIX
+  const serverPath = path.join('uploads', userPath); // "uploads/providers/8"
+  const publicPath = `/uploads/${userPath}/${fileName}`; // "/uploads/providers/8/filename.jpg"
+  const fullFilePath = path.join(process.cwd(), serverPath, fileName);
 
-  // Create directory
-  await fs.mkdir(uploadDir, { recursive: true });
+  // Create directory with proper permissions
+  await fs.mkdir(path.dirname(fullFilePath), { 
+    recursive: true,
+    mode: 0o755 // rwxr-xr-x
+  });
 
-  // Write file
+  // Write file with proper permissions
   await fs.writeFile(fullFilePath, Buffer.from(await file.arrayBuffer()));
+  await fs.chmod(fullFilePath, 0o644); // rw-r--r--
 
-  // Verify write
+  // Verify the file exists and is readable
   try {
-    await fs.access(fullFilePath);
+    await fs.access(fullFilePath, fs.constants.R_OK);
+    console.log('File successfully saved at:', fullFilePath);
     return publicPath;
   } catch (error) {
-    console.error('File upload verification failed:', error);
-    throw new Error('Failed to verify file upload');
+    console.error('File verification failed:', {
+      error,
+      fullFilePath,
+      publicPath
+    });
+    throw new Error('Uploaded file cannot be accessed');
   }
 }
 

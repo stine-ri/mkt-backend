@@ -10,9 +10,9 @@ import {
     timestamp,
     date,
     time,
-    pgEnum,
      jsonb,
-     numeric
+     numeric,
+     pgEnum
   } from "drizzle-orm/pg-core";
   import { relations } from "drizzle-orm";
   
@@ -180,6 +180,86 @@ export const pastWorks = pgTable('past_works', {
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 
+// Product Status Enum
+export const productStatusEnum = pgEnum('product_status', ['draft', 'published', 'archived']);
+
+// Sale Status Enum
+export const saleStatusEnum = pgEnum('sale_status', ['pending', 'completed', 'cancelled']);
+
+// Products Table
+export const products = pgTable('products', {
+  id: serial('id').primaryKey(),
+  providerId: integer('provider_id').notNull().references(() => providers.id),
+  name: text('name').notNull(),
+  description: text('description').notNull(),
+  price: numeric('price', { precision: 12, scale: 2 }).notNull(), // Using numeric for precise decimal storage
+  category: text('category').notNull(),
+  stock: integer('stock'),
+  status: productStatusEnum('status').notNull().default('draft'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Product Images Table
+export const productImages = pgTable('product_images', {
+  id: serial('id').primaryKey(),
+  productId: integer('product_id').notNull().references(() => products.id, { onDelete: 'cascade' }),
+  url: text('url').notNull(),
+  isPrimary: boolean('is_primary').default(false),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+// Product Sales Table
+export const productSales = pgTable('product_sales', {
+  id: serial('id').primaryKey(),
+  productId: integer('product_id').notNull().references(() => products.id),
+  providerId: integer('provider_id').notNull().references(() => providers.id),
+  customerId: integer('customer_id').notNull().references(() => users.id),
+  quantity: integer('quantity').notNull(),
+  totalPrice: numeric('total_price', { precision: 12, scale: 2 }).notNull(),
+  status: saleStatusEnum('status').notNull().default('pending'),
+  paymentMethod: text('payment_method'),
+  transactionId: text('transaction_id'),
+  shippingAddress: text('shipping_address'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+// Product Relations
+export const productsRelations = relations(products, ({ many, one }) => ({
+  provider: one(providers, {
+    fields: [products.providerId],
+    references: [providers.id],
+  }),
+  images: many(productImages),
+  sales: many(productSales),
+}));
+
+// Product Images Relations
+export const productImagesRelations = relations(productImages, ({ one }) => ({
+  product: one(products, {
+    fields: [productImages.productId],
+    references: [products.id],
+  }),
+}));
+
+// Product Sales Relations
+export const productSalesRelations = relations(productSales, ({ one }) => ({
+  product: one(products, {
+    fields: [productSales.productId],
+    references: [products.id],
+  }),
+  provider: one(providers, {
+    fields: [productSales.providerId],
+    references: [providers.id],
+  }),
+  customer: one(users, {
+    fields: [productSales.customerId],
+    references: [users.id],
+  }),
+}));
+
+
 // Define all relations
 export const authenticationRelations = relations(Authentication, ({ one }) => ({
     user: one(users, {
@@ -319,6 +399,15 @@ export type TSServices = typeof services.$inferSelect;
 
 export type TINotifications = typeof notifications.$inferInsert;
 export type TSNotifications = typeof notifications.$inferSelect;
+
+export type TIProducts = typeof products.$inferInsert;
+export type TSProducts = typeof products.$inferSelect;
+
+export type TIProductImages = typeof productImages.$inferInsert;
+export type TSProductImages = typeof productImages.$inferSelect;
+
+export type TIProductSales = typeof productSales.$inferInsert;
+export type TSProductSales = typeof productSales.$inferSelect;
 
 // Extend the base request type to include relations
 export type TSRequestsWithRelations = TSRequests & {

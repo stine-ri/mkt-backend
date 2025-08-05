@@ -40,7 +40,7 @@ app.use(
 // Serve static files from uploads directory
 app.use('/uploads/*', serveStatic({ 
   root: './',
-  rewriteRequestPath: (path) => path.replace(/^\/uploads/, '') 
+  rewriteRequestPath: (path) => path 
 }));
 
 // PUBLIC ROUTES (before auth middleware) - EXACT PATHS ONLY

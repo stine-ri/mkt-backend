@@ -161,3 +161,15 @@ Content-Type: application/json
     "email": "kmutai@gmail.com",
     "password": "2001km"
   }
+###
+curl -I http://localhost:3000/uploads/providers/8/1754257329883-ui-mama-shule.jpg
+
+###
+curl -X POST -F "image=@test.jpg" http://localhost:3000/api/upload
+###
+curl -I "https://your-render-app.onrender.com/uploads/providers/8/test.jpg"
+###
+curl -X POST \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjExIiwiZW1haWwiOiJjeXJ1c0BnbWFpbC5jb20iLCJyb2xlIjoiY2xpZW50In0.31XRm1RFUJjTO-mVc7MQckp0iTXDAHr8RttABr3FGqk" \
+  -F "image=@test.jpg" \
+  http://localhost:3000/api/provider/profile

@@ -5,6 +5,7 @@ export type JwtPayload = {
   role: 'admin' | 'client' | 'service_provider';
   name?: string;    
   avatar?: string | null;
+  providerId?: number| null;
 };
 
 export type CustomContext = {

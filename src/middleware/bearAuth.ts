@@ -5,12 +5,12 @@ import type { CustomContext } from "../types/context.js";
 import type { JwtPayload } from '../types/context.js';
 
 export const verifyToken = async (token: string, secret: string) => {
-    try {
-        const decoded = await verify(token, secret);
-        return decoded as JwtPayload;
-    } catch {
-        return null;
-    }
+  try {
+    const decoded = await verify(token, secret);
+    return decoded as JwtPayload;
+  } catch {
+    return null;
+  }
 };
 
 export const authMiddleware = async (c: Context<CustomContext>, next: Next) => {
@@ -20,23 +20,27 @@ export const authMiddleware = async (c: Context<CustomContext>, next: Next) => {
     '/api/services',
     '/api/colleges',
     '/api/login',
-     '/uploads/',
-   '/api/register',
-   '/api/provider/public',
+    '/uploads',
+    '/uploads/',
+    '/api/register',
+    '/api/provider/public',
     '/health',  // Health check route
     // Add more public route paths here
   ];
 
   const path = c.req.path;
+
   console.log('Auth middleware - checking path:', path);
   console.log('Public routes:', publicRoutes);
-  
+  console.log('Raw request path:', c.req.url);
+  console.log('Normalized path:', c.req.path);
+
   const isPublic = publicRoutes.some(publicRoute => {
     const matches = path.startsWith(publicRoute);
     console.log(`Checking if '${path}' starts with '${publicRoute}': ${matches}`);
     return matches;
   });
-  
+
   console.log('Is path public?:', isPublic);
 
   const token = c.req.header("Authorization")?.split(" ")[1];
@@ -56,12 +60,15 @@ export const authMiddleware = async (c: Context<CustomContext>, next: Next) => {
         return c.json({ error: "Invalid token payload" }, 401);
       }
 
+      // Set user context
       c.set("user", {
         id: decoded.id,
         email: decoded.email,
         role: decoded.role,
-         name: decoded.name 
+        name: decoded.name,
+        providerId: decoded.providerId ?? null, // ADDITION: set providerId if present
       });
+
       console.log('Token verified successfully');
     } catch (error) {
       console.log('Token verification failed:', error);
@@ -76,16 +83,16 @@ export const authMiddleware = async (c: Context<CustomContext>, next: Next) => {
 };
 
 export const roleMiddleware = (requiredRole: JwtPayload['role']) => {
-    return async (c: Context<CustomContext>, next: Next) => {
-        const user = c.get('user');
-        console.log(`Role middleware - required: ${requiredRole}, user role: ${user?.role}`);
-        
-        if (!user || user.role !== requiredRole) {
-            console.log('Role check failed - returning 403');
-            return c.json({ error: "Unauthorized" }, 403);
-        }
-        await next();
-    };
+  return async (c: Context<CustomContext>, next: Next) => {
+    const user = c.get('user');
+    console.log(`Role middleware - required: ${requiredRole}, user role: ${user?.role}`);
+
+    if (!user || user.role !== requiredRole) {
+      console.log('Role check failed - returning 403');
+      return c.json({ error: "Unauthorized" }, 403);
+    }
+    await next();
+  };
 };
 
 export const adminRoleAuth = roleMiddleware("admin");
