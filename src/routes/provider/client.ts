@@ -15,6 +15,7 @@ import {
 } from '../../drizzle/schema.js';
 
 import { authMiddleware, clientRoleAuth } from '../../middleware/bearAuth.js';
+import { normalizeUrl } from '../../utils/normalizeUrl.js'; 
 
 const app = new Hono()
   .use('*', authMiddleware)
@@ -113,8 +114,9 @@ type QueryResult = {
 };
 
 // Fixed request handler
-app.get('/requests', async (c) => {
+app.get('/requests',  async (c) => {
   const user = c.get('user');
+  console.log('User from context:', user); 
   const userId = Number(user.id);
   const includeParam = c.req.query('include') || '';
 
@@ -269,7 +271,7 @@ app.get('/requests', async (c) => {
   isProfileComplete: i.provider.isProfileComplete,
   rating: i.provider.rating,
   completedRequests: i.provider.completedRequests,
-  profileImageUrl: i.provider.profileImageUrl,
+  profileImageUrl: normalizeUrl(i.provider.profileImageUrl),
   createdAt: i.provider.createdAt,
   updatedAt: i.provider.updatedAt,
   user: i.provider.user ? {
@@ -278,7 +280,7 @@ app.get('/requests', async (c) => {
     email: i.provider.user.email,
     contact_phone: i.provider.user.contact_phone,
     address: i.provider.user.address,
-    avatar: i.provider.user.avatar,
+    avatar: normalizeUrl(i.provider.user.avatar),
     role: ['admin', 'service_provider', 'client'].includes(i.provider.user.role)
       ? i.provider.user.role as "admin" | "service_provider" | "client"
       : 'client',

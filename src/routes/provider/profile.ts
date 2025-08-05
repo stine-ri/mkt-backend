@@ -12,7 +12,10 @@ import { env } from 'hono/adapter';
 
 const app = new Hono<CustomContext>();
 
-app.use('/uploads/*', serveStatic({ root: './' }));
+app.use('/uploads/*', serveStatic({ 
+  root: './',
+  rewriteRequestPath: (path) => path.replace(/^\/uploads\//, '/uploads/')
+}));
 
 // Apply auth to all routes
 app.use('*', authMiddleware);
@@ -331,6 +334,4 @@ app.get('/:id', async (c: Context<CustomContext>) => {
         }, 500);
     }
 });
-
-
 export default app;
