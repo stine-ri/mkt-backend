@@ -184,7 +184,7 @@ app.route('/', profileUploadHandler);
 app.route('api/interests', interestRoutes);
 app.route('/api/interests', interests);
 app.route('/api/chat', chat);
-app.route('./api/product', product)
+app.route('/api/product', product)
 // Mount public provider routes
 app.route('/api/provider/public', publicProviderRoutes);
 // PROTECTED Admin endpoints (CREATE/UPDATE/DELETE operations)
