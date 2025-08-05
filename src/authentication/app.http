@@ -151,7 +151,7 @@ Content-Type: application/json
  
   {  
     "email": "riyan99@gmail.com",
-    "password": "2003"
+    "password": "2003riyan"
   }
 ###
 POST http://localhost:3000/api/login
@@ -161,3 +161,4 @@ Content-Type: application/json
     "email": "kmutai@gmail.com",
     "password": "2001km"
   }
+###

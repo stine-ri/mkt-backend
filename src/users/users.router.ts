@@ -6,7 +6,7 @@ import { adminRoleAuth } from "../middleware/bearAuth.js";
 import { db } from "../drizzle/db.js"; // Your Drizzle DB connection
 import { users } from "../drizzle/schema.js";
 import nodemailer from "nodemailer";
-import { eq } from "drizzle-orm";
+import { eq , inArray } from "drizzle-orm";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -50,3 +50,26 @@ const transporter = nodemailer.createTransport({
 });
 
 
+// ✅ Bulk delete users
+userRouter.post('/users/bulk-delete', async (c) => {
+  try {
+    const body = await c.req.json();
+    const { ids } = body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return c.json({ message: 'No user IDs provided' }, 400);
+    }
+
+    // Delete users from database
+   await db.delete(users).where(
+  ids.length === 1
+    ? eq(users.id, ids[0])
+    : inArray(users.id, ids)
+);
+
+    return c.json({ message: 'Users deleted successfully' }, 200);
+  } catch (error) {
+    console.error('Error in bulk-delete route:', error);
+    return c.json({ message: 'Failed to delete users' }, 500);
+  }
+});
