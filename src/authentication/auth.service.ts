@@ -1,4 +1,4 @@
-import { Authentication, users, TIAuthentication, TIUsers } from "../drizzle/schema.js";
+import { Authentication, users } from "../drizzle/schema.js";
 import db from "../drizzle/db.js";
 import { eq } from "drizzle-orm";
 
@@ -14,44 +14,57 @@ interface AuthUserResponse {
     };
 }
 
-export const createAuthUserService = async (user: TIUsers & { password: string }): Promise<{
+export const createAuthUserService = async (user: {
+    full_name: string;
+    email: string;
+    contact_phone: string;
+    address: string;
+    role: 'admin' | 'service_provider' | 'client';
+    password: string;
+}): Promise<{
     id: number;
     email: string;
     role: 'admin' | 'service_provider' | 'client';
     full_name: string;
 } | null> => {
+    let createdUser;
+    
     try {
-        return await db.transaction(async (tx) => {
-            // Insert into Users table
-            const createdUser = await tx.insert(users).values({
-                full_name: user.full_name,
-                email: user.email,
-                contact_phone: user.contact_phone,
-                address: user.address,
-                role: user.role,
-            }).returning({ 
-                id: users.id,
-                email: users.email,
-                role: users.role,
-                full_name: users.full_name
-            });
-
-            if (!createdUser[0]?.id) {
-                throw new Error("Failed to create user in users table");
-            }
-
-            // Insert into Auth table - ensure non-null values
-            await tx.insert(Authentication).values({
-                user_id: createdUser[0].id,
-                password: user.password, // password is guaranteed to be string from input type
-                role: user.role as 'admin' | 'service_provider' | 'client',
-                email: user.email // email is guaranteed to be string from schema
-            });
-
-            return createdUser[0];
+        // Insert into Users table
+        createdUser = await db.insert(users).values({
+            full_name: user.full_name,
+            email: user.email,
+            contact_phone: user.contact_phone,
+            address: user.address,
+            role: user.role,
+        }).returning({ 
+            id: users.id,
+            email: users.email,
+            role: users.role,
+            full_name: users.full_name
         });
+
+        if (!createdUser[0]?.id) {
+            throw new Error("Failed to create user in users table");
+        }
+
+        // Insert into Auth table
+        await db.insert(Authentication).values({
+            user_id: createdUser[0].id,
+            password: user.password,
+            role: user.role,
+            email: user.email
+        });
+
+        return createdUser[0];
     } catch (error) {
         console.error("Error creating user:", error);
+        
+        // Clean up if user was created but auth failed
+        if (createdUser?.[0]?.id) {
+            await db.delete(users).where(eq(users.id, createdUser[0].id));
+        }
+        
         return null;
     }
 };
@@ -81,12 +94,9 @@ export const userLoginService = async (credentials: { email: string }): Promise<
             return null;
         }
 
-        // Type assertion since we've already validated the role
-        const validRole = result.role as 'admin' | 'service_provider' | 'client';
-
         return {
             email: result.email,
-            role: validRole,
+            role: result.role as 'admin' | 'service_provider' | 'client',
             password: result.password,
             user: {
                 id: result.user.id,
