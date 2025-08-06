@@ -31,17 +31,17 @@ export const getUser = async (c: Context) => {
 export const createUser = async (c: Context) => {
     try {
         const user = await c.req.json();
-        const password=user.password;
-        const hashedPassword=await bcrypt.hash(password,10);
-        user.password=hashedPassword;
-        const createduser = await createuserservice(user);
-
-
-        if (!createduser) return c.text("user not created", 404);
-        return c.json({ msg: createduser }, 201);
+        const password = user.password;
+        const hashedPassword = await bcrypt.hash(password, 10);
+        user.password = hashedPassword;
+        
+        const createdUser = await createuserservice(user);
+        if (!createdUser) return c.text("User not created", 404);
+        
+        return c.json(createdUser, 201); // Return the full user object
 
     } catch (error: any) {
-        return c.json({ error: error?.message }, 400)
+        return c.json({ error: error?.message }, 400);
     }
 }
 

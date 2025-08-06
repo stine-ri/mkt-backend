@@ -19,8 +19,8 @@ export const getuserservice = async (id: number): Promise<TIUsers | undefined> =
 }
 
 export const createuserservice = async (user: TIUsers) => {
-    await db.insert(users).values(user)
-    return "user created successfully";
+    const result = await db.insert(users).values(user).returning();
+    return result[0]; // Return the created user object
 }
 
 export const updateuserservice = async (id: number, user: TIUsers) => {
