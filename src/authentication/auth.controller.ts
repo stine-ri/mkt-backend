@@ -1,12 +1,12 @@
 import "dotenv/config";
 import { Context } from "hono";
-import { createAuthUserService, userLoginService } from "./auth.service";
+import { createAuthUserService, userLoginService } from "./auth.service.js";
 import * as bcrypt from "bcrypt";
 import { sign } from "hono/jwt";
-import { providers } from "../drizzle/schema";
-import db from "../drizzle/db";
+import { providers } from "../drizzle/schema.js";
+import db from "../drizzle/db.js";
 import { eq } from 'drizzle-orm';
-import type { JwtPayload } from '../types/context';
+import type { JwtPayload } from '../types/context.js';
 
 export const registerUser = async (c: Context) => {
     try {
