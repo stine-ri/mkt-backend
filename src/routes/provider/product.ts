@@ -15,7 +15,7 @@ import {
   DatabaseError,
   ValidationError 
 } from '../../utils/error.js'; // Import the custom errors
-import { uploadFile } from '../../utils/filestorage.js';
+import { uploadFile, deleteFile  } from '../../utils/filestorage.js';
 
 const product = new Hono()
   .use('*', authMiddleware)
@@ -111,54 +111,85 @@ product.post('/', async (c) => {
     throw new ValidationError('At least one image is required');
   }
 
+  let productId: number | null = null;
+  let uploadedImageUrls: string[] = [];
+
   try {
-    const product = await db.transaction(async (tx) => {
-      try {
-        // Create product
-        const [product] = await tx.insert(products).values({
-          providerId,
-          name,
-          description,
-          price: priceNum.toString(),
-          category,
-          stock: stock ? parseInt(stock) : null,
-          status: 'draft',
-        }).returning();
+    // Step 1: Create the product record
+    const [product] = await db.insert(products).values({
+      providerId,
+      name,
+      description,
+      price: priceNum.toString(),
+      category,
+      stock: stock ? parseInt(stock) : null,
+      status: 'draft',
+    }).returning();
 
-        // Handle image uploads
-        const uploadedImages = await Promise.all(
-          imageFiles.map(async (file) => {
-            try {
-              const userPath = `providers/${providerId}/products/${product.id}`;
-              const url = await uploadFile(file, userPath, c);
-              
-              const [image] = await tx.insert(productImages).values({
-                productId: product.id,
-                url,
-              }).returning();
+    productId = product.id;
 
-              return image;
-            } catch (error) {
-              console.error('Error uploading image:', error);
-              throw new FileUploadError(`Failed to upload image: ${file.name}`);
-            }
-          })
-        );
+    // Step 2: Upload all images first (without database records)
+    const uploadResults = await Promise.allSettled(
+      imageFiles.map(async (file) => {
+        try {
+          const userPath = `providers/${providerId}/products/${productId}`;
+          const url = await uploadFile(file, userPath, c);
+          uploadedImageUrls.push(url);
+          return url;
+        } catch (error) {
+          console.error('Error uploading image:', error);
+          throw new FileUploadError(`Failed to upload image: ${file.name}`);
+        }
+      })
+    );
 
-        return {
-          ...product,
-          images: uploadedImages.map(img => img.url),
-        };
-      } catch (error) {
-        // Transaction will automatically roll back
-        throw error;
-      }
-    });
+    // Check for failed uploads
+    const failedUploads = uploadResults.filter(r => r.status === 'rejected');
+    if (failedUploads.length > 0) {
+      throw new FileUploadError(
+        `${failedUploads.length} image upload(s) failed. ` +
+        failedUploads.map((f: any) => f.reason?.message).join(', ')
+      );
+    }
 
-    return c.json(product, 201);
+    // Step 3: Create all image records in a single batch
+    const imageRecords = await db.insert(productImages).values(
+      uploadedImageUrls.map(url => ({
+        productId: productId!,
+        url,
+      }))
+    ).returning();
+
+    return c.json({
+      ...product,
+      images: imageRecords.map(img => img.url),
+    }, 201);
+
   } catch (error) {
     console.error('Error creating product:', error);
     
+    // Cleanup if something failed after product creation
+if (productId) {
+  try {
+    // Delete the product if it was created
+    await db.delete(products).where(eq(products.id, productId));
+    
+    // Delete any uploaded files
+    await Promise.allSettled(
+      uploadedImageUrls.map(url => 
+        deleteFile(url).catch((e: Error) => {
+          console.error('Failed to delete file:', url, e.message);
+        })
+      )
+    );
+  } catch (cleanupError) {
+    console.error('Product deletion failed:', cleanupError instanceof Error 
+      ? cleanupError.message 
+      : 'Unknown error');
+  }
+}
+    
+    // Error response handling
     if (error instanceof ValidationError) {
       try {
         const details = JSON.parse(error.message);
@@ -173,13 +204,6 @@ product.post('/', async (c) => {
         error: 'File upload failed',
         details: error.message 
       }, 400);
-    }
-    
-    if (error instanceof DatabaseError) {
-      return c.json({ 
-        error: 'Database operation failed',
-        details: error.message 
-      }, 500);
     }
     
     return c.json({ 
