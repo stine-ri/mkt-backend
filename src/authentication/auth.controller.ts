@@ -35,6 +35,11 @@ export const registerUser = async (c: Context) => {
             return c.json({ error: "Password must be at least 8 characters" }, 400);
         }
 
+        // Optional: Validate password confirmation if sent
+        if (user.confirmPassword && user.password !== user.confirmPassword) {
+            return c.json({ error: "Passwords do not match" }, 400);
+        }
+
         const hashedPassword = await bcrypt.hash(user.password, 10);
         
         const createdUser = await createAuthUserService({
@@ -46,11 +51,13 @@ export const registerUser = async (c: Context) => {
             return c.json({ error: "User creation failed" }, 400);
         }
 
+        let providerId: number | null = null;
+        
         // Create provider record only if role is service_provider
         if (user.role === 'service_provider') {
             try {
                 const nameParts = createdUser.full_name.split(' ');
-                await db.insert(providers).values({
+                const provider = await db.insert(providers).values({
                     userId: createdUser.id,
                     firstName: nameParts[0] || 'Provider',
                     lastName: nameParts.slice(1).join(' ') || 'User',
@@ -58,21 +65,36 @@ export const registerUser = async (c: Context) => {
                     status: 'active',
                     createdAt: new Date(),
                     updatedAt: new Date()
-                });
+                }).returning({ id: providers.id });
+                
+                providerId = provider[0]?.id || null;
             } catch (error) {
                 console.error("Provider creation failed:", error);
                 // Continue with user registration even if provider creation fails
-                // You might want to delete the user if provider creation is critical
             }
         }
 
+        // Create JWT token for immediate login after registration
+        const payload: JwtPayload = {
+            id: createdUser.id.toString(),
+            email: createdUser.email,
+            role: createdUser.role as 'admin' | 'service_provider' | 'client',
+            ...(providerId ? { providerId } : {})
+        };
+
+        const token = await sign(payload, process.env.JWT_SECRET as string);
+
         return c.json({
             message: "User registered successfully",
+            token, // Include the token in response
             user: {
                 id: createdUser.id,
                 email: createdUser.email,
                 role: createdUser.role,
-                full_name: createdUser.full_name
+                full_name: createdUser.full_name,
+                contact_phone: user.contact_phone,
+                address: user.address,
+                providerId // Include providerId if exists
             }
         }, 201);
 
@@ -84,7 +106,6 @@ export const registerUser = async (c: Context) => {
         }, 400);
     }
 };
-
 export const loginUser = async (c: Context) => {
     try {
         const credentials = await c.req.json();
