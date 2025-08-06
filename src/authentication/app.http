@@ -162,12 +162,12 @@ Content-Type: application/json
     "password": "2001km"
   }
 ###
-curl -X POST \
-  https://mkt-backend-sz2s.onrender.com/api/product \
-  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjgiLCJlbWFpbCI6ImttdXRhaUBnbWFpbC5jb20iLCJyb2xlIjoic2VydmljZV9wcm92aWRlciJ9.X_DH-T8rmr_HZRCQwYEnstblZohcY-Tc7M5b2DtatdM' \
-  -H 'Content-Type: multipart/form-data' \
-  -F 'name=Test Product' \
-  -F 'description=Test Description' \
-  -F 'price=19.99' \
-  -F 'category=Test Category' \
-  -F 'images=@/path/to/image.jpg'
+###
+POST http://localhost:3000/api/login
+Content-Type: application/json
+ 
+  {  
+    "email": "Kimri99@gmail.com",
+    "password": "2993"
+  }
+###

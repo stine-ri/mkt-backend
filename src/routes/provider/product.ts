@@ -10,7 +10,7 @@ import {
 } from '../../drizzle/schema.js';
 import { authMiddleware, serviceProviderRoleAuth } from '../../middleware/bearAuth.js';
 
-const app = new Hono()
+const product = new Hono()
   .use('*', authMiddleware)
   .use('*', serviceProviderRoleAuth);
 
@@ -22,14 +22,27 @@ const handleImageUpload = async (file: File): Promise<string> => {
 };
 
 // Get provider's products
-app.get('/my', async (c) => {
-  const providerId = c.get('user').providerId;
-if (typeof providerId !== 'number') {
-  return c.json({ error: 'Invalid provider ID' }, 400);
-}
+product.get('/my',  async (c) => {
+  console.log('🔥 /api/product/my route hit');
+  
+  const user = c.get('user');
+  
+  // First check if user is authenticated as service provider
+  if (user.role !== 'service_provider') {
+    return c.json({ error: 'Unauthorized - not a service provider' }, 403);
+  }
+
+  // Then check if providerId exists
+  if (user.providerId === null || user.providerId === undefined) {
+    return c.json({ 
+      error: 'Service provider account not properly linked',
+      details: 'No provider ID found for this user'
+    }, 400);
+  }
+
   try {
     const result = await db.query.products.findMany({
-      where: eq(products.providerId, providerId),
+      where: eq(products.providerId, user.providerId),
       orderBy: [desc(products.createdAt)],
       with: {
         images: {
@@ -53,7 +66,7 @@ if (typeof providerId !== 'number') {
 });
 
 // Create new product
-app.post('/', async (c) => {
+product.post('/', async (c) => {
   const providerId = c.get('user').providerId;
   if (typeof providerId !== 'number') {
     return c.json({ error: 'Invalid provider ID' }, 400);
@@ -129,7 +142,7 @@ app.post('/', async (c) => {
 });
 
 // Update product status
-app.patch('/:id/status', async (c) => {
+product.patch('/:id/status', async (c) => {
   const providerId = c.get('user').providerId;
   if (typeof providerId !== 'number') {
   return c.json({ error: 'Invalid provider ID' }, 400);
@@ -167,7 +180,7 @@ app.patch('/:id/status', async (c) => {
 });
 
 // Delete product
-app.delete('/:id', async (c) => {
+product.delete('/:id', async (c) => {
   const providerId = c.get('user').providerId;
   if (typeof providerId !== 'number') {
   return c.json({ error: 'Invalid provider ID' }, 400);
@@ -198,7 +211,7 @@ app.delete('/:id', async (c) => {
 });
 
 // Get product sales
-app.get('/sales', async (c) => {
+product.get('/sales', async (c) => {
   const providerId = c.get('user').providerId;
 if (typeof providerId !== 'number') {
   return c.json({ error: 'Invalid provider ID' }, 400);
@@ -250,7 +263,7 @@ if (typeof providerId !== 'number') {
 });
 
 // Update sale status
-app.patch('/sales/:id', async (c) => {
+product.patch('/sales/:id', async (c) => {
   const providerId = c.get('user').providerId;
   if (typeof providerId !== 'number') {
   return c.json({ error: 'Invalid provider ID' }, 400);
@@ -287,4 +300,4 @@ app.patch('/sales/:id', async (c) => {
   }
 });
 
-export default app;
+export default product;     
