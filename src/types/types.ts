@@ -75,3 +75,18 @@ export interface College {
   name: string;
   createdAt: Date;
 }
+// types/auth.ts
+export interface User {
+  id: number;
+  email: string;
+  role: string;
+  full_name?: string;
+  contact_phone?: string;
+  address?: string;
+  // other user fields
+}
+
+export interface AuthResponse {
+  user: User;
+  // any other fields returned by createAuthUserService
+}

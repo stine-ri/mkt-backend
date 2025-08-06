@@ -274,6 +274,7 @@ app.get('/requests',  async (c) => {
   profileImageUrl: normalizeUrl(i.provider.profileImageUrl),
   createdAt: i.provider.createdAt,
   updatedAt: i.provider.updatedAt,
+   status: 'some-default-status',
   user: i.provider.user ? {
     id: i.provider.user.id,
     full_name: i.provider.user.full_name,

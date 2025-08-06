@@ -73,6 +73,7 @@ export const providers = pgTable('providers', {
   rating: integer('rating'),
   completedRequests: integer('completed_requests').default(0),
   profileImageUrl: varchar('profile_image_url', { length: 500 }),
+  status: varchar('status', { length: 50 }).default('active'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
