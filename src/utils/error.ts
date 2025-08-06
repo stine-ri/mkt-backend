@@ -13,3 +13,22 @@ export class RouteError extends Error {
     this.name = 'RouteError';
   }
 }
+export class FileUploadError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'FileUploadError';
+  }
+}
+
+export class DatabaseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DatabaseError';
+  }
+}
+export class ValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ValidationError';
+  }
+}

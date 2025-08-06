@@ -1,46 +1,66 @@
 // utils/filestorage.ts
 import fs from 'fs/promises';
 import path from 'path';
-import { env } from 'hono/adapter';
+import { randomUUID } from 'crypto';
 import type { Context } from 'hono';
 
-export async function uploadFile(file: File, userPath: string, c: Context): Promise<string> {
-  // Validate input
-  if (!file || !userPath) throw new Error('Invalid file or user path');
+// Supported image MIME types
+const ALLOWED_MIME_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif'
+];
 
-  // Create safe filename
-  const timestamp = Date.now();
-  const originalName = path.parse(file.name).name.replace(/[^a-zA-Z0-9._-]/g, '-');
-  const extension = path.extname(file.name).toLowerCase();
-  const fileName = `${timestamp}-${originalName}${extension}`;
+// Maximum file size (5MB)
+const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
-  // Define paths - CRITICAL FIX
-  const serverPath = path.join('uploads', userPath); // "uploads/providers/8"
-  const publicPath = `/uploads/${userPath}/${fileName}`; // "/uploads/providers/8/filename.jpg"
-  const fullFilePath = path.join(process.cwd(), serverPath, fileName);
-
-  // Create directory with proper permissions
-  await fs.mkdir(path.dirname(fullFilePath), { 
-    recursive: true,
-    mode: 0o755 // rwxr-xr-x
-  });
-
-  // Write file with proper permissions
-  await fs.writeFile(fullFilePath, Buffer.from(await file.arrayBuffer()));
-  await fs.chmod(fullFilePath, 0o644); // rw-r--r--
-
-  // Verify the file exists and is readable
+export async function uploadFile(
+  file: File, 
+  userPath: string, 
+  c: Context
+): Promise<string> {
   try {
-    await fs.access(fullFilePath, fs.constants.R_OK);
-    console.log('File successfully saved at:', fullFilePath);
+    // Validate input
+    if (!file || !userPath) {
+      throw new Error('Invalid file or user path');
+    }
+
+    // Validate file type
+    if (!ALLOWED_MIME_TYPES.includes(file.type)) {
+      throw new Error(`Unsupported file type: ${file.type}`);
+    }
+
+    // Validate file size
+    if (file.size > MAX_FILE_SIZE) {
+      throw new Error(`File too large (max ${MAX_FILE_SIZE/1024/1024}MB)`);
+    }
+
+    // Create safe filename
+    const originalName = path.parse(file.name).name.replace(/[^a-zA-Z0-9._-]/g, '-');
+    const extension = path.extname(file.name).toLowerCase();
+    const fileName = `${randomUUID()}-${originalName}${extension}`;
+
+    // Define paths
+    const serverPath = path.join('uploads', userPath);
+    const publicPath = `/uploads/${userPath}/${fileName}`;
+    const fullFilePath = path.join(process.cwd(), serverPath, fileName);
+
+    // Create directory with proper permissions
+    await fs.mkdir(path.dirname(fullFilePath), { 
+      recursive: true,
+      mode: 0o755 // rwxr-xr-x
+    });
+
+    // Write file with proper permissions
+    const buffer = await file.arrayBuffer();
+    await fs.writeFile(fullFilePath, Buffer.from(buffer));
+    await fs.chmod(fullFilePath, 0o644); // rw-r--r--
+
     return publicPath;
   } catch (error) {
-    console.error('File verification failed:', {
-      error,
-      fullFilePath,
-      publicPath
-    });
-    throw new Error('Uploaded file cannot be accessed');
+    console.error('File upload failed:', error);
+    throw error;
   }
 }
 
@@ -48,31 +68,32 @@ export async function deleteFile(fileUrl: string): Promise<void> {
   if (!fileUrl) return;
 
   try {
+    // Convert URL to filesystem path
     const relativePath = fileUrl.startsWith('/uploads/') 
       ? fileUrl.substring(1)
       : fileUrl.replace(/^\/?uploads\//, 'uploads/');
     
-    await fs.unlink(path.join(process.cwd(), relativePath));
+    const fullPath = path.join(process.cwd(), relativePath);
+    
+    // Check if file exists before deleting
+    try {
+      await fs.access(fullPath);
+      await fs.unlink(fullPath);
+      
+      // Optional: Clean up empty directories
+      const dirPath = path.dirname(fullPath);
+      const files = await fs.readdir(dirPath);
+      if (files.length === 0) {
+        await fs.rmdir(dirPath);
+      }
+    }  catch (err: unknown) {
+  if (err instanceof Error && (err as any).code !== 'ENOENT') {
+    throw err;
+  }
+}
+
   } catch (error) {
     console.error('Error deleting file:', error);
     throw error;
-  }
-}
-
-// For cloud storage integration
-interface StorageService {
-  upload(file: File, path: string): Promise<string>;
-  delete(url: string): Promise<void>;
-}
-
-// Example S3 implementation stub
-class S3Storage implements StorageService {
-  async upload(file: File, path: string): Promise<string> {
-    // Implement actual S3 upload
-    return `https://your-bucket.s3.amazonaws.com/${path}/${file.name}`;
-  }
-
-  async delete(url: string): Promise<void> {
-    // Implement S3 deletion
   }
 }

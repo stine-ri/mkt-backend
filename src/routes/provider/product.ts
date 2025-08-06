@@ -9,17 +9,24 @@ import {
   users
 } from '../../drizzle/schema.js';
 import { authMiddleware, serviceProviderRoleAuth } from '../../middleware/bearAuth.js';
+import { serveStatic } from '@hono/node-server/serve-static';
+import { 
+  FileUploadError,
+  DatabaseError,
+  ValidationError 
+} from '../../utils/error.js'; // Import the custom errors
+import { uploadFile } from '../../utils/filestorage.js';
 
 const product = new Hono()
   .use('*', authMiddleware)
   .use('*', serviceProviderRoleAuth);
 
-// Helper function to handle image URLs (replace with your actual storage solution)
-const handleImageUpload = async (file: File): Promise<string> => {
-  // In a real implementation, this would upload to your storage service
-  // For now, we'll just return a placeholder URL
-  return `https://example.com/images/${file.name}`;
-};
+  product.use('/uploads/*', serveStatic({ 
+    root: './',
+    rewriteRequestPath: (path) => path.replace(/^\/uploads\//, '/uploads/')
+  }));
+
+
 
 // Get provider's products
 product.get('/my',  async (c) => {
@@ -69,7 +76,7 @@ product.get('/my',  async (c) => {
 product.post('/', async (c) => {
   const providerId = c.get('user').providerId;
   if (typeof providerId !== 'number') {
-    return c.json({ error: 'Invalid provider ID' }, 400);
+    throw new ValidationError('Invalid provider ID');
   }
 
   const formData = await c.req.formData();
@@ -83,7 +90,7 @@ product.post('/', async (c) => {
   const imageFiles = formData.getAll('images') as File[];
 
   if (!name || !description || !price || !category) {
-    return c.json({ 
+    throw new ValidationError(JSON.stringify({
       error: 'Missing required fields',
       details: {
         name: !name ? 'Product name is required' : undefined,
@@ -91,53 +98,94 @@ product.post('/', async (c) => {
         price: !price ? 'Price is required' : undefined,
         category: !category ? 'Category is required' : undefined
       }
-    }, 400);
+    }));
   }
 
   // Validate price is a valid number
   const priceNum = parseFloat(price);
   if (isNaN(priceNum)) {
-    return c.json({ error: 'Price must be a valid number' }, 400);
+    throw new ValidationError('Price must be a valid number');
   }
 
   if (imageFiles.length === 0) {
-    return c.json({ error: 'At least one image is required' }, 400);
+    throw new ValidationError('At least one image is required');
   }
 
   try {
     const product = await db.transaction(async (tx) => {
-      // Create product
-      const [product] = await tx.insert(products).values({
-        providerId,
-        name,
-        description,
-        price: price, // Pass as string - drizzle will handle numeric conversion
-        category,
-        stock: stock ? parseInt(stock) : null,
-        status: 'draft',
-      }).returning();
+      try {
+        // Create product
+        const [product] = await tx.insert(products).values({
+          providerId,
+          name,
+          description,
+          price: priceNum.toString(),
+          category,
+          stock: stock ? parseInt(stock) : null,
+          status: 'draft',
+        }).returning();
 
-      // Handle image uploads
-      const uploadedImages = await Promise.all(
-        imageFiles.map(async (file) => {
-          const url = await handleImageUpload(file);
-          return tx.insert(productImages).values({
-            productId: product.id,
-            url,
-          }).returning();
-        })
-      );
+        // Handle image uploads
+        const uploadedImages = await Promise.all(
+          imageFiles.map(async (file) => {
+            try {
+              const userPath = `providers/${providerId}/products/${product.id}`;
+              const url = await uploadFile(file, userPath, c);
+              
+              const [image] = await tx.insert(productImages).values({
+                productId: product.id,
+                url,
+              }).returning();
 
-      return {
-        ...product,
-        images: uploadedImages.flat().map(img => img.url),
-      };
+              return image;
+            } catch (error) {
+              console.error('Error uploading image:', error);
+              throw new FileUploadError(`Failed to upload image: ${file.name}`);
+            }
+          })
+        );
+
+        return {
+          ...product,
+          images: uploadedImages.map(img => img.url),
+        };
+      } catch (error) {
+        // Transaction will automatically roll back
+        throw error;
+      }
     });
 
     return c.json(product, 201);
   } catch (error) {
     console.error('Error creating product:', error);
-    return c.json({ error: 'Failed to create product' }, 500);
+    
+    if (error instanceof ValidationError) {
+      try {
+        const details = JSON.parse(error.message);
+        return c.json(details, 400);
+      } catch {
+        return c.json({ error: error.message }, 400);
+      }
+    }
+    
+    if (error instanceof FileUploadError) {
+      return c.json({ 
+        error: 'File upload failed',
+        details: error.message 
+      }, 400);
+    }
+    
+    if (error instanceof DatabaseError) {
+      return c.json({ 
+        error: 'Database operation failed',
+        details: error.message 
+      }, 500);
+    }
+    
+    return c.json({ 
+      error: 'Internal server error',
+      details: error instanceof Error ? error.message : undefined
+    }, 500);
   }
 });
 

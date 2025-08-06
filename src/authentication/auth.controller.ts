@@ -1,16 +1,40 @@
 import "dotenv/config";
 import { Context } from "hono";
-import { createAuthUserService, userLoginService } from "./auth.service.js";
+import { createAuthUserService, userLoginService } from "./auth.service";
 import * as bcrypt from "bcrypt";
 import { sign } from "hono/jwt";
-import { providers } from "../drizzle/schema.js";
-import db from "../drizzle/db.js";
+import { providers } from "../drizzle/schema";
+import db from "../drizzle/db";
 import { eq } from 'drizzle-orm';
-import type { JwtPayload } from '../types/context.js';
+import type { JwtPayload } from '../types/context';
 
 export const registerUser = async (c: Context) => {
     try {
         const user = await c.req.json();
+        
+        // Enhanced validation
+        if (!user.email || !user.password || !user.full_name || !user.contact_phone) {
+            return c.json({ 
+                error: "Missing required fields",
+                required: {
+                    email: !user.email ? "Email is required" : null,
+                    password: !user.password ? "Password is required" : null,
+                    full_name: !user.full_name ? "Full name is required" : null,
+                    contact_phone: !user.contact_phone ? "Phone number is required" : null
+                }
+            }, 400);
+        }
+
+        // Validate email format
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(user.email)) {
+            return c.json({ error: "Invalid email format" }, 400);
+        }
+
+        // Validate password length
+        if (user.password.length < 8) {
+            return c.json({ error: "Password must be at least 8 characters" }, 400);
+        }
+
         const hashedPassword = await bcrypt.hash(user.password, 10);
         
         const createdUser = await createAuthUserService({
@@ -22,21 +46,23 @@ export const registerUser = async (c: Context) => {
             return c.json({ error: "User creation failed" }, 400);
         }
 
-        // Create provider record for service providers
+        // Create provider record only if role is service_provider
         if (user.role === 'service_provider') {
             try {
+                const nameParts = createdUser.full_name.split(' ');
                 await db.insert(providers).values({
                     userId: createdUser.id,
-                    firstName: user.firstName || createdUser.full_name.split(' ')[0] || 'Provider',
-                    lastName: user.lastName || createdUser.full_name.split(' ').slice(1).join(' ') || 'User',
-                    phoneNumber: user.phoneNumber || user.contact_phone || '+0000000000',
+                    firstName: nameParts[0] || 'Provider',
+                    lastName: nameParts.slice(1).join(' ') || 'User',
+                    phoneNumber: user.contact_phone,
                     status: 'active',
                     createdAt: new Date(),
                     updatedAt: new Date()
                 });
             } catch (error) {
                 console.error("Provider creation failed:", error);
-                // Continue even if provider creation fails
+                // Continue with user registration even if provider creation fails
+                // You might want to delete the user if provider creation is critical
             }
         }
 
@@ -51,13 +77,22 @@ export const registerUser = async (c: Context) => {
         }, 201);
 
     } catch (error: any) {
-        return c.json({ error: error?.message }, 400);
+        console.error("Registration error:", error);
+        return c.json({ 
+            error: error?.message || "Registration failed",
+            details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        }, 400);
     }
 };
 
 export const loginUser = async (c: Context) => {
     try {
         const credentials = await c.req.json();
+        
+        if (!credentials.email || !credentials.password) {
+            return c.json({ error: "Email and password are required" }, 400);
+        }
+
         const authResponse = await userLoginService(credentials);
 
         if (!authResponse) {
@@ -82,15 +117,15 @@ export const loginUser = async (c: Context) => {
             });
             providerId = provider?.id ?? null;
         }
-console.log('✔ Provider ID resolved:', providerId);
+
         // Create JWT payload
         const payload: JwtPayload = {
             id: authResponse.user.id.toString(),
             email: authResponse.email,
             role: authResponse.role,
-           ...(providerId !== null ? { providerId } : {}),
+            ...(providerId !== null ? { providerId } : {}),
         };
-console.log('🔐 JWT Payload:', payload);
+
         const token = await sign(payload, process.env.JWT_SECRET as string);
 
         return c.json({
@@ -108,6 +143,9 @@ console.log('🔐 JWT Payload:', payload);
 
     } catch (error: any) {
         console.error("Login error:", error);
-        return c.json({ error: error?.message || "Login failed" }, 400);
+        return c.json({ 
+            error: error?.message || "Login failed",
+            details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        }, 400);
     }
 };
