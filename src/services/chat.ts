@@ -1,7 +1,7 @@
 // services/chat.ts
 import { Hono } from 'hono';
 import { db } from './../drizzle/db.js';
-import { chatRooms, messages, paymentAgreements, users } from './../drizzle/schema.js';
+import { chatRooms, messages, paymentAgreements, requests, users, providers } from './../drizzle/schema.js';
 import { eq, and, desc, or, exists, InferModel } from 'drizzle-orm';
 import type { CustomContext } from '../types/context.js';
 import { notifyUser } from '../lib/notification.js';
@@ -35,20 +35,20 @@ app.get('/', async (c) => {
         request: {
           columns: {
             id: true,
-            title: true
+            productName: true
           }
         },
         client: {
           columns: {
             id: true,
-            name: true,
+            full_name: true,
             avatar: true
           }
         },
         provider: {
           columns: {
             id: true,
-            name: true,
+            full_name: true,
             avatar: true
           }
         },
@@ -145,6 +145,7 @@ app.get('/:roomId/messages', async (c) => {
 
 
 // Send a message
+
 app.post('/:roomId/messages', async (c) => {
   try {
     const roomId = Number(c.req.param('roomId'));
@@ -152,58 +153,72 @@ app.post('/:roomId/messages', async (c) => {
     const userId = Number(user.id);
     const { content } = await c.req.json();
 
-    // Verify user has access to this chat room
-    const room = await db.query.chatRooms.findFirst({
-      where: and(
-        eq(chatRooms.id, roomId),
-        or(
-          eq(chatRooms.clientId, userId),
-          eq(chatRooms.providerId, userId)
-        )
-      ),
-      with: {
-        client: true,
-        provider: true
-      }
-    });
+    // Validate input
+    if (!content || typeof content !== 'string' || content.trim().length === 0) {
+      return c.json({ error: 'Message content is required' }, 400);
+    }
 
-    if (!room) {
+    // Verify user has access (simplified query)
+const roomExists = await db.query.chatRooms.findFirst({
+  where: and(
+    eq(chatRooms.id, roomId),
+    or(
+      eq(chatRooms.clientId, userId),
+      eq(chatRooms.providerId, userId)
+    )
+  ),
+  columns: {
+    id: true,
+    clientId: true,
+    providerId: true
+  }
+});
+
+
+    if (!roomExists) {
       return c.json({ error: 'Unauthorized access to chat room' }, 403);
     }
 
+    // Insert message without trying to return relations
     const [message] = await db.insert(messages).values({
       chatRoomId: roomId,
       senderId: userId,
       content,
-      createdAt: new Date()
-    }).returning();
+      createdAt: new Date(),
+      read: false
+    }).returning({
+      id: messages.id,
+      content: messages.content,
+      createdAt: messages.createdAt,
+      read: messages.read,
+      chatRoomId: messages.chatRoomId,
+      senderId: messages.senderId
+    });
 
-    // Update chat room's updatedAt
+    // Update chat room timestamp
     await db.update(chatRooms)
       .set({ updatedAt: new Date() })
       .where(eq(chatRooms.id, roomId));
 
-    // Notify the other participant
-    const recipientId = userId === room.clientId ? room.providerId : room.clientId;
-    await notifyUser(recipientId, {
-      type: 'new_message',
-      chatRoomId: roomId,
+    // Manually construct response with sender info
+    return c.json({
+      id: message.id,
+      content: message.content,
+      createdAt: message.createdAt,
+      read: message.read,
       sender: {
         id: userId,
-        name: user.name ?? 'Unknown',
+        name: user.name || 'Unknown',
         avatar: user.avatar
-      },
-      message: {
-        id: message.id,
-        content: message.content,
-        createdAt: message.createdAt
       }
-    });
+    }, 201);
 
-    return c.json(message, 201);
   } catch (error) {
-    console.error('Error sending message:', error);
-    return c.json({ error: 'Failed to send message' }, 500);
+    console.error('Detailed error sending message:', error);
+    return c.json({ 
+      error: 'Failed to send message',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
   }
 });
 
@@ -227,44 +242,49 @@ app.post('/:roomId/agreements', async (c) => {
       return c.json({ error: 'Unauthorized access to chat room' }, 403);
     }
 
+    // Create payment agreement
     const [agreement] = await db.insert(paymentAgreements).values({
       chatRoomId: roomId,
-      amount,
+      amount: amount.toString(),
       paymentMethod,
       terms,
+      status: 'pending',
       createdAt: new Date(),
       updatedAt: new Date()
     }).returning();
 
-    // Create a system message
+    // Create system message
     await db.insert(messages).values({
       chatRoomId: roomId,
       senderId: userId,
       content: `Payment agreement created: KSh ${amount} via ${paymentMethod}`,
       isSystem: true,
+      read: false,
       createdAt: new Date()
     });
 
-    // Notify provider
-    const roomWithProvider = await db.query.chatRooms.findFirst({
-      where: eq(chatRooms.id, roomId),
-      with: {
-        provider: true
+    // Get provider info through proper relations
+    const provider = await db.query.providers.findFirst({
+      where: eq(providers.id, room.providerId),
+      columns: {
+        userId: true
       }
-    }) as RoomWithProvider;
+    });
 
-    if (roomWithProvider?.provider) {
-      await notifyUser(roomWithProvider.provider.id, {
-        type: 'new_payment_agreement',
-        chatRoomId: roomId,
-        agreement: {
-          id: agreement.id,
-          amount,
-          paymentMethod
-        }
-      
-      });
+    if (!provider) {
+      return c.json({ error: 'Provider not found' }, 404);
     }
+
+    // Notify provider using the user ID
+    await notifyUser(provider.userId, {
+      type: 'new_payment_agreement',
+      chatRoomId: roomId,
+      agreement: {
+        id: agreement.id,
+        amount,
+        paymentMethod
+      }
+    });
 
     return c.json(agreement, 201);
   } catch (error) {

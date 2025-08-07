@@ -270,13 +270,14 @@ export const authenticationRelations = relations(Authentication, ({ one }) => ({
         references: [users.id],
     }),
 }));
-
 export const userRelations = relations(users, ({ many }) => ({
   authentication: many(Authentication),
   providers: many(providers),
   requests: many(requests),
   bids: many(bids),
-  sentMessages: many(messages),
+    sentMessages: many(messages, { relationName: 'messageSender' }),
+  clientChats: many(chatRooms, { relationName: 'chatRoomClient' }),
+  providerChats: many(chatRooms, { relationName: 'chatRoomProvider' }),
 }));
 
 export const messagesRelations = relations(messages, ({ one }) => ({
@@ -287,8 +288,28 @@ export const messagesRelations = relations(messages, ({ one }) => ({
   sender: one(users, {
     fields: [messages.senderId],
     references: [users.id],
+    relationName: 'messageSender'
   }),
 }));
+
+export const chatRoomsRelations = relations(chatRooms, ({ many, one }) => ({
+  messages: many(messages),
+  client: one(users, {
+    fields: [chatRooms.clientId],
+    references: [users.id],
+    relationName: 'chatRoomClient'
+  }),
+  provider: one(users, {
+    fields: [chatRooms.providerId],
+    references: [users.id],
+    relationName: 'chatRoomProvider'
+  }),
+  request: one(requests, {
+    fields: [chatRooms.requestId],
+    references: [requests.id],
+  }),
+}));
+
 export const providerRelations = relations(providers, ({ many, one }) => ({
   user: one(users, {
     fields: [providers.userId],
