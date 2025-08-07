@@ -100,7 +100,7 @@ app.get('/:roomId/messages', async (c) => {
         sender: {
           columns: {
             id: true,
-            name: true,
+            full_name: true, 
             avatar: true
           }
         }

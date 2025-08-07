@@ -276,8 +276,19 @@ export const userRelations = relations(users, ({ many }) => ({
   providers: many(providers),
   requests: many(requests),
   bids: many(bids),
+  sentMessages: many(messages),
 }));
 
+export const messagesRelations = relations(messages, ({ one }) => ({
+  chatRoom: one(chatRooms, {
+    fields: [messages.chatRoomId],
+    references: [chatRooms.id],
+  }),
+  sender: one(users, {
+    fields: [messages.senderId],
+    references: [users.id],
+  }),
+}));
 export const providerRelations = relations(providers, ({ many, one }) => ({
   user: one(users, {
     fields: [providers.userId],
