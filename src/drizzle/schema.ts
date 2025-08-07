@@ -134,6 +134,8 @@ export const interests = pgTable('interests', {
     .references(() => requests.id, { onDelete: 'cascade' }),
   providerId: integer('provider_id')
     .references(() => providers.id, { onDelete: 'cascade' }),
+      chatRoomId: integer('chat_room_id')
+    .references(() => chatRooms.id),
   createdAt: timestamp('created_at').defaultNow(),
   message: text('message'),
   isShortlisted: boolean('is_shortlisted').default(false),

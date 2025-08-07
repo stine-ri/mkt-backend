@@ -306,6 +306,7 @@ app.delete('/:interestId', async (c) => {
 
 
 // Add endpoints for client to accept/reject interests
+
 app.post('/:interestId/accept', async (c) => {
   try {
     const interestId = Number(c.req.param('interestId'));
@@ -315,7 +316,6 @@ app.post('/:interestId/accept', async (c) => {
     const interest = await db.query.interests.findFirst({
       where: and(
         eq(interests.id, interestId),
-        // Join with request to verify ownership
         exists(
           db.select()
             .from(requests)
@@ -339,38 +339,58 @@ app.post('/:interestId/accept', async (c) => {
       return c.json({ error: 'Interest not found or unauthorized' }, 404);
     }
 
-    // Update interest status
+    // Validate required fields
+    if (!interest.requestId || !interest.providerId) {
+      return c.json({ error: 'Invalid request or provider data' }, 400);
+    }
+
+    // Create chat room if it doesn't exist
+    let chatRoom = await db.query.chatRooms.findFirst({
+      where: and(
+        eq(chatRooms.requestId, interest.requestId),
+        eq(chatRooms.clientId, Number(user.id)),
+        eq(chatRooms.providerId, interest.providerId)
+      )
+    });
+
+    if (!chatRoom) {
+      [chatRoom] = await db.insert(chatRooms).values({
+        requestId: interest.requestId,
+        clientId: Number(user.id),
+        providerId: interest.providerId,
+        status: 'active',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      }).returning();
+    }
+
+    // Update interest status and link chat room
     await db.update(interests)
-      .set({ status: 'accepted' })
+      .set({ 
+        status: 'accepted',
+        chatRoomId: chatRoom.id
+      })
       .where(eq(interests.id, interestId));
 
-    // Create chat room
-const [chatRoom] = await db.insert(chatRooms).values({
-  requestId: interest.requestId as number,
-  providerId: interest.providerId as number,
-  clientId: Number(user.id) as number,
-}).returning();
-
-// Notify provider
-if (interest.provider?.user) {
-  await notifyUser(interest.provider.user.id, {
-    type: 'interest_accepted',
-    requestId: interest.requestId ?? undefined,
-    chatRoomId: chatRoom.id,
-    isRead: false, // ✅ Required field
-    client: {
-      id: Number(user.id),
-      name: user.name,
-      avatar: user.avatar
+    // Notify provider
+    if (interest.provider?.user) {
+      await notifyUser(interest.provider.user.id, {
+        type: 'interest_accepted',
+        requestId: interest.requestId,
+        chatRoomId: chatRoom.id,
+        isRead: false,
+        client: {
+          id: Number(user.id),
+          name: user.name,
+          avatar: user.avatar
+        }
+      });
     }
-  });
-}
-
-
 
     return c.json({ 
-      message: 'Interest accepted successfully',
-      chatRoomId: chatRoom.id
+      success: true,
+      chatRoomId: chatRoom.id,
+      message: 'Interest accepted successfully'
     });
 
   } catch (error) {

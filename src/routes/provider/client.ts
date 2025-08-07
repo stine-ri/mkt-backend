@@ -80,6 +80,7 @@ type QueryResult = {
     message: string | null;
     status: string;
     isShortlisted: boolean | null;
+    chatRoomId?: number | null; 
     createdAt: Date | null;
     provider?: {
       id: number;
@@ -169,6 +170,7 @@ app.get('/requests',  async (c) => {
               message: true,
               status: true,
               isShortlisted: true,
+              chatRoomId: true,
               createdAt: true
             },
             with: {
@@ -255,6 +257,7 @@ app.get('/requests',  async (c) => {
           providerId: i.providerId,
           message: i.message,
           status: i.status,
+          chatRoomId: i.chatRoomId ?? null,
           isShortlisted: i.isShortlisted,
           createdAt: i.createdAt,
       provider: i.provider ? {

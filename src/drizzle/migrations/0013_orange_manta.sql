@@ -1,0 +1,2 @@
+ALTER TABLE "interests" ADD COLUMN "chat_room_id" integer;--> statement-breakpoint
+ALTER TABLE "interests" ADD CONSTRAINT "interests_chat_room_id_chat_rooms_id_fk" FOREIGN KEY ("chat_room_id") REFERENCES "public"."chat_rooms"("id") ON DELETE no action ON UPDATE no action;
