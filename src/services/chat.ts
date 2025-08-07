@@ -71,6 +71,10 @@ app.get('/', async (c) => {
 app.get('/:roomId/messages', async (c) => {
   try {
     const roomId = Number(c.req.param('roomId'));
+        // Add validation
+    if (isNaN(roomId)) {
+      return c.json({ error: 'Invalid chat room ID' }, 400);
+    }
     const user = c.get('user');
     const userId = Number(user.id);
 
@@ -115,10 +119,28 @@ app.get('/:roomId/messages', async (c) => {
       ));
 
     return c.json(chatMessages.reverse()); // Return oldest first
-  } catch (error) {
-    console.error('Error fetching messages:', error);
-    return c.json({ error: 'Failed to fetch messages' }, 500);
+  }catch (error) {
+  console.error('Error fetching messages:', error);
+
+  if (error instanceof Error) {
+    return c.json(
+      {
+        error: 'Failed to fetch messages',
+        details: error.message,
+      },
+      500
+    );
   }
+
+  // fallback if error is not an instance of Error
+  return c.json(
+    {
+      error: 'Failed to fetch messages',
+      details: 'An unknown error occurred',
+    },
+    500
+  );
+}
 });
 
 
