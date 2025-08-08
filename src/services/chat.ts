@@ -2,7 +2,7 @@
 import { Hono } from 'hono';
 import { db } from './../drizzle/db.js';
 import { chatRooms, messages, paymentAgreements, requests, users, providers , interests} from './../drizzle/schema.js';
-import { eq, and, desc, or, exists, InferModel } from 'drizzle-orm';
+import { eq, and, desc, or, exists,inArray, InferModel } from 'drizzle-orm';
 import type { CustomContext } from '../types/context.js';
 import { notifyUser } from '../lib/notification.js';
 
@@ -541,6 +541,89 @@ await db.insert(messages).values({
     console.error('Error creating chat from interest:', error);
     return c.json({ 
       error: 'Failed to create chat room',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
+  }
+});
+
+//chatroom endpoint 
+app.get('/chats/:chatId', async (c) => {
+  try {
+    const chatId = Number(c.req.param('chatId'));
+    const user = c.get('user');
+    const userId = Number(user.id);
+
+    console.log('Fetching chat room (chats route):', { chatId, userId });
+
+    if (isNaN(chatId)) {
+      return c.json({ error: 'Invalid chat ID' }, 400);
+    }
+
+    const chatRoom = await db.query.chatRooms.findFirst({
+      where: and(
+        eq(chatRooms.id, chatId),
+        or(
+          eq(chatRooms.clientId, userId),
+          eq(chatRooms.providerId, userId)
+        )
+      ),
+      with: {
+        request: true,
+        client: { 
+          columns: { 
+            id: true, 
+            full_name: true, 
+            email: true 
+          } 
+        },
+        provider: { 
+          columns: { 
+            id: true, 
+            full_name: true, 
+            email: true 
+          } 
+        },
+        messages: {
+          orderBy: (messages, { asc }) => [asc(messages.createdAt)],
+          with: {
+            sender: { 
+              columns: { 
+                id: true, 
+                full_name: true 
+              } 
+            }
+          }
+        }
+      }
+    });
+
+    if (!chatRoom) {
+      return c.json({ error: 'Chat room not found or access denied' }, 404);
+    }
+
+    // Mark unread messages as read
+    const unreadMessageIds = chatRoom.messages
+      .filter(msg => !msg.read && msg.senderId !== userId)
+      .map(msg => msg.id);
+
+    if (unreadMessageIds.length > 0) {
+      await db.update(messages)
+        .set({ read: true })
+        .where(inArray(messages.id, unreadMessageIds));
+    }
+
+    const userRole = chatRoom.clientId === userId ? 'client' : 'provider';
+
+    return c.json({
+      ...chatRoom,
+      userRole,
+      unreadCount: 0 // Since we just marked them as read
+    });
+
+  } catch (error) {
+    console.error('Error fetching chat room (chats route):', error);
+    return c.json({
+      error: 'Failed to fetch chat room',
       details: error instanceof Error ? error.message : 'Unknown error'
     }, 500);
   }
