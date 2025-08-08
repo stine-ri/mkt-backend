@@ -390,6 +390,10 @@ export const notificationsRelations = relations(notifications, ({ one }) => ({
     references: [users.id],
   }),
 }));
+
+// Define the Interest type first
+export type TInterest = typeof interests.$inferSelect;
+
 export const interestsRelations = relations(interests, ({ one }) => ({
   request: one(requests, {
     fields: [interests.requestId],
@@ -398,6 +402,10 @@ export const interestsRelations = relations(interests, ({ one }) => ({
   provider: one(providers, {
     fields: [interests.providerId],
     references: [providers.id],
+  }),
+  chatRoom: one(chatRooms, {
+    fields: [interests.chatRoomId],
+    references: [chatRooms.id],
   }),
 }));
 

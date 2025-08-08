@@ -1,7 +1,7 @@
 // services/chat.ts
 import { Hono } from 'hono';
 import { db } from './../drizzle/db.js';
-import { chatRooms, messages, paymentAgreements, requests, users, providers } from './../drizzle/schema.js';
+import { chatRooms, messages, paymentAgreements, requests, users, providers , interests} from './../drizzle/schema.js';
 import { eq, and, desc, or, exists, InferModel } from 'drizzle-orm';
 import type { CustomContext } from '../types/context.js';
 import { notifyUser } from '../lib/notification.js';
@@ -400,6 +400,77 @@ app.post('/:roomId/agreements/:agreementId/accept', async (c) => {
   } catch (error) {
     console.error('Error accepting payment agreement:', error);
     return c.json({ error: 'Failed to accept payment agreement' }, 500);
+  }
+});
+
+// Create chat room when interest is accepted
+app.post('/from-interest/:interestId', async (c) => {
+  try {
+    const interestId = Number(c.req.param('interestId'));
+    const user = c.get('user');
+    
+    // Type-safe interest query
+    const interest = await db.query.interests.findFirst({
+      where: eq(interests.id, interestId),
+      with: {
+        request: true,
+        provider: {
+          with: {
+            user: true
+          }
+        }
+      }
+    });
+
+    if (!interest) {
+      return c.json({ error: 'Interest not found' }, 404);
+    }
+// First check if interest.request exists and has required fields
+if (!interest.request || !interest.request.userId) {
+  throw new Error("Interest request or request user is null");
+}
+
+if (!interest.requestId || !interest.providerId) {
+  throw new Error("Missing required interest fields");
+}
+
+// Convert user.id to number if it's a string
+const senderId = typeof user.id === 'string' ? parseInt(user.id) : user.id;
+if (isNaN(senderId)) {
+  throw new Error("Invalid user ID");
+}
+
+// Create new chat room - only include fields that exist in the schema
+const [chatRoom] = await db.insert(chatRooms).values({
+  requestId: interest.requestId,
+  clientId: interest.request.userId,
+  providerId: interest.providerId,
+  status: 'active',
+  createdAt: new Date(),
+  updatedAt: new Date()
+}).returning();
+
+// Type-safe message creation
+await db.insert(messages).values({
+  chatRoomId: chatRoom.id,
+  senderId: senderId,
+  content: `Chat started for request: ${interest.request.productName || 'Unknown'}`,
+  isSystem: true,
+  read: false,
+  createdAt: new Date()
+});
+    // Update the interest with chat room ID
+    await db.update(interests)
+      .set({ chatRoomId: chatRoom.id })
+      .where(eq(interests.id, interestId));
+
+    return c.json(chatRoom, 201);
+  } catch (error) {
+    console.error('Error creating chat from interest:', error);
+    return c.json({ 
+      error: 'Failed to create chat room',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
   }
 });
 
