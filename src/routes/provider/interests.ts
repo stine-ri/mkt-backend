@@ -313,69 +313,42 @@ app.post('/:interestId/accept', async (c) => {
     const user = c.get('user');
     const userId = Number(user.id);
 
-    console.log('Accept interest request:', { interestId, userId });
-
-    // Debug: First, let's see if the interest exists at all
-    const interestExists = await db.query.interests.findFirst({
-      where: eq(interests.id, interestId),
-      with: {
-        provider: { columns: { userId: true } },
-        request: { columns: { id: true, userId: true, productName: true } }
-      }
-    });
-
-    console.log('Interest exists check:', interestExists);
-
-    if (!interestExists) {
-      return c.json({ error: 'Interest not found' }, 404);
-    }
-
-    // Debug: Check if the user owns the request
-    if (interestExists.requestId) {
-      const requestOwnership = await db.query.requests.findFirst({
-        where: and(
-          eq(requests.id, interestExists.requestId),
-          eq(requests.userId, userId)
-        )
-      });
-      console.log('Request ownership check:', requestOwnership);
-    }
-
-    // 1. Find interest & validate ownership with simplified query
+    // 1. Find interest with all needed relations
     const interest = await db.query.interests.findFirst({
-      where: eq(interests.id, interestId),
-      with: {
-        provider: { columns: { userId: true } },
-        request: { columns: { id: true, userId: true, productName: true } }
+  where: eq(interests.id, interestId),
+  with: {
+    provider: {
+      columns: { userId: true },
+      with: { 
+        user: { columns: { id: true, full_name: true, avatar: true } } 
       }
-    });
+    },
+    request: { 
+      columns: { id: true, userId: true, productName: true },
+      with: { 
+        user: { columns: { id: true, full_name: true, avatar: true } } 
+      }
+    }
+  }
+});
 
-    console.log('Interest found:', interest);
 
     if (!interest) {
       return c.json({ error: 'Interest not found' }, 404);
     }
 
-    // 2. Validate that the current user owns the request
-    if (!interest.request || interest.request.userId !== userId) {
-      console.log('Authorization failed:', { 
-        requestUserId: interest.request?.userId, 
-        currentUserId: userId 
-      });
-      return c.json({ error: 'Unauthorized - you do not own this request' }, 403);
-    }
-
-    // 3. Null checks for required properties
-    if (!interest.provider || interest.requestId === null) {
-      console.log('Missing required data:', { 
-        hasProvider: !!interest.provider, 
-        requestId: interest.requestId 
-      });
+    // 2. Validate ownership and required data
+    if (!interest.request || !interest.provider || !interest.requestId) {
       return c.json({ error: 'Invalid interest data' }, 400);
     }
 
-    if (interest.provider.userId === null) {
-      return c.json({ error: 'Invalid provider data' }, 400);
+    if (interest.request.userId !== userId) {
+      return c.json({ error: 'Unauthorized' }, 403);
+    }
+
+    // Type guard to ensure we have all required user data
+    if (!interest.provider.user || !interest.request.user) {
+      return c.json({ error: 'Missing user data' }, 400);
     }
 
     // 4. Check for existing chat
@@ -392,23 +365,20 @@ app.post('/:interestId/accept', async (c) => {
             eq(chatRooms.providerId, interest.request.userId)
           )
         )
-      )
+      ),
+      with: {
+        request: true,
+        client: true,
+        provider: true
+      }
     });
-
-    console.log('Existing room check:', existingRoom);
 
     let chatRoom;
     if (existingRoom) {
       chatRoom = existingRoom;
     } else {
       // 5. Create new chat room
-      console.log('Creating new chat room with:', {
-        requestId: interest.requestId,
-        clientId: interest.request.userId,
-        providerId: interest.provider.userId
-      });
-
-      [chatRoom] = await db.insert(chatRooms).values({
+      const [newRoom] = await db.insert(chatRooms).values({
         requestId: interest.requestId,
         clientId: interest.request.userId,
         providerId: interest.provider.userId,
@@ -417,15 +387,40 @@ app.post('/:interestId/accept', async (c) => {
         updatedAt: new Date()
       }).returning();
 
+      if (!newRoom) {
+        throw new Error('Failed to create chat room');
+      }
+
       // 6. Create system welcome message
       await db.insert(messages).values({
-        chatRoomId: chatRoom.id,
+        chatRoomId: newRoom.id,
         senderId: userId,
-        content: `Chat started for request: ${interest.request.productName || 'Unknown'}`,
+        content: `Chat started for request: ${interest.request.productName || 'Product'}`,
         isSystem: true,
         read: false,
         createdAt: new Date()
       });
+
+      // Fetch the newly created room with relations
+      const fetchedRoom = await db.query.chatRooms.findFirst({
+        where: eq(chatRooms.id, newRoom.id),
+        with: {
+          request: true,
+          client: true,
+          provider: true
+        }
+      });
+
+      if (!fetchedRoom) {
+        throw new Error('Failed to fetch created chat room');
+      }
+
+      chatRoom = fetchedRoom;
+    }
+
+    // At this point, chatRoom is guaranteed to be defined
+    if (!chatRoom) {
+      throw new Error('Chat room not created or found');
     }
 
     // 7. Update interest
@@ -433,15 +428,39 @@ app.post('/:interestId/accept', async (c) => {
       .set({ status: 'accepted', chatRoomId: chatRoom.id })
       .where(eq(interests.id, interestId));
 
-    // 8. Notify provider
+    // 8. Prepare response with all needed data
+    const responseData = {
+      id: chatRoom.id,
+      requestId: chatRoom.requestId,
+      clientId: chatRoom.clientId,
+      providerId: chatRoom.providerId,
+      status: chatRoom.status,
+      createdAt: chatRoom.createdAt,
+      updatedAt: chatRoom.updatedAt,
+      request: {
+        id: interest.request.id,
+        productName: interest.request.productName
+      },
+      client: {
+        id: interest.request.user.id,
+        name: interest.request.user.full_name,
+        avatar: interest.request.user.avatar
+      },
+      provider: {
+        id: interest.provider.user.id,
+        name: interest.provider.user.full_name,
+        avatar: interest.provider.user.avatar
+      }
+    };
+
+    // 9. Notify provider
     await notifyUser(interest.provider.userId, {
       type: 'interest_accepted',
-      requestId: interest.requestId ?? undefined,
+      requestId: interest.requestId,
       chatRoomId: chatRoom.id
     });
 
-    console.log('Interest accepted successfully:', { chatRoomId: chatRoom.id });
-    return c.json(chatRoom, existingRoom ? 200 : 201);
+    return c.json(responseData, existingRoom ? 200 : 201);
 
   } catch (error) {
     console.error('Error accepting interest:', error);
@@ -451,7 +470,6 @@ app.post('/:interestId/accept', async (c) => {
     }, 500);
   }
 });
-
 
 app.post('/:interestId/reject', async (c) => {
   try {
