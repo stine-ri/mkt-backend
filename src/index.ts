@@ -16,7 +16,6 @@ import { authMiddleware } from './middleware/bearAuth.js';
 import interestRoutes from './routes/provider/interests.js'
 import { db } from './drizzle/db.js';
 import publicProviderRoutes from './routes/provider/publicProvider.js';
-import interests from './routes/provider/interests.js';
 import chat from './services/chat.js';
 import product from './routes/provider/product.js'
 import { eq, and, or, gte, lte, inArray } from 'drizzle-orm';
@@ -181,8 +180,7 @@ app.route('/api/colleges', collegesRoute);
 app.route('/api/client', clientRoutes);  // Fixed: added leading slash
 app.route('/', serviceRoutes);
 app.route('/', profileUploadHandler);
-app.route('api/interests', interestRoutes);
-app.route('/api/interests', interests);
+app.route('/api/interests', interestRoutes);
 app.route('/api/chat', chat);
 app.route('/api/chat/', chat); 
 app.route('/api/product', product)

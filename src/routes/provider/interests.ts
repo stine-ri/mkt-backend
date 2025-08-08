@@ -307,7 +307,7 @@ app.delete('/:interestId', async (c) => {
 
 // Add endpoints for client to accept/reject interests
 
-app.post('/interests/:interestId/accept', async (c) => {
+app.post('/:interestId/accept', async (c) => {
   try {
     const interestId = Number(c.req.param('interestId'));
     const user = c.get('user');
@@ -457,7 +457,9 @@ app.post('/:interestId/reject', async (c) => {
   try {
     const interestId = Number(c.req.param('interestId'));
     const user = c.get('user');
+ const userId = Number(user.id);
 
+    console.log('Accept interest request:', { interestId, userId });
    const interest = await db.query.interests.findFirst({
   where: and(
     eq(interests.id, interestId),
@@ -503,8 +505,11 @@ if (interest.provider?.user && interest.requestId !== null) {
     return c.json({ message: 'Interest rejected successfully' });
 
   } catch (error) {
-    console.error('Error rejecting interest:', error);
-    return c.json({ error: 'Failed to reject interest' }, 500);
+    console.error('Error accepting interest:', error);
+    return c.json({
+      error: 'Failed to accept interest',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
   }
 });
 
