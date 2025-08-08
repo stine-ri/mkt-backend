@@ -170,5 +170,3 @@ Content-Type: application/json
     "email": "kasire@gmail.com",
     "password": "23451"
   }
-###
-curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjQ0IiwiZW1haWwiOiJrYXNpcmVAZ21haWwuY29tIiwicm9sZSI6InNlcnZpY2VfcHJvdmlkZXIifQ.u0_Radaz56eCwVEZ76dUGbfYjdloNEAUPu_S_qYVQFM"  https://mkt-backend-sz2s.onrender.com/api/chat
