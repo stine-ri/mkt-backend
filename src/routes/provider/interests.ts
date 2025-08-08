@@ -429,29 +429,29 @@ app.post('/:interestId/accept', async (c) => {
       .where(eq(interests.id, interestId));
 
     // 8. Prepare response with all needed data
-    const responseData = {
-      id: chatRoom.id,
-      requestId: chatRoom.requestId,
-      clientId: chatRoom.clientId,
-      providerId: chatRoom.providerId,
-      status: chatRoom.status,
-      createdAt: chatRoom.createdAt,
-      updatedAt: chatRoom.updatedAt,
-      request: {
-        id: interest.request.id,
-        productName: interest.request.productName
-      },
-      client: {
-        id: interest.request.user.id,
-        name: interest.request.user.full_name,
-        avatar: interest.request.user.avatar
-      },
-      provider: {
-        id: interest.provider.user.id,
-        name: interest.provider.user.full_name,
-        avatar: interest.provider.user.avatar
-      }
-    };
+const responseData = {
+  id: chatRoom.id,
+  requestId: chatRoom.requestId,
+  clientId: chatRoom.clientId,
+  providerId: chatRoom.providerId,
+  status: chatRoom.status,
+  createdAt: chatRoom.createdAt,
+  updatedAt: chatRoom.updatedAt,
+  request: {
+    id: interest.request.id,
+    productName: interest.request.productName || 'Product' // Ensure fallback
+  },
+  client: {
+    id: interest.request.user.id,
+    name: interest.request.user.full_name || 'Client',
+    avatar: interest.request.user.avatar || '/default-avatar.png'
+  },
+  provider: {
+    id: interest.provider.user.id,
+    name: interest.provider.user.full_name || 'Provider',
+    avatar: interest.provider.user.avatar || '/default-avatar.png'
+  }
+};
 
     // 9. Notify provider
     await notifyUser(interest.provider.userId, {
