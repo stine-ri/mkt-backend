@@ -22,7 +22,7 @@ type User = typeof users.$inferSelect; // ✅ recommended
 
 // Get chat rooms for user
 
-// In services/chat.ts
+
 app.get('/', async (c) => {
   try {
     const user = c.get('user');
@@ -69,6 +69,78 @@ app.get('/', async (c) => {
     console.error('Detailed error:', error);
     return c.json({ 
       error: 'Failed to fetch chat rooms',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
+  }
+});
+// General chat room creation endpoint
+app.post('/', async (c) => {
+  try {
+    const user = c.get('user');
+    const { requestId, clientId, providerId } = await c.req.json();
+    const userId = Number(user.id);
+
+    // Validate input
+    if (!requestId || !clientId || !providerId) {
+      return c.json({ error: 'Missing required fields' }, 400);
+    }
+
+    // Verify the requesting user is either the client or provider
+    if (userId !== clientId && userId !== providerId) {
+      return c.json({ error: 'Unauthorized to create this chat room' }, 403);
+    }
+
+    // Check if chat room already exists
+    const existingRoom = await db.query.chatRooms.findFirst({
+      where: and(
+        eq(chatRooms.requestId, requestId),
+        or(
+          and(
+            eq(chatRooms.clientId, clientId),
+            eq(chatRooms.providerId, providerId)
+          ),
+          and(
+            eq(chatRooms.clientId, providerId),
+            eq(chatRooms.providerId, clientId)
+          )
+        )
+      )
+    });
+
+    if (existingRoom) {
+      return c.json(existingRoom);
+    }
+
+    // Create new chat room
+    const [chatRoom] = await db.insert(chatRooms).values({
+      requestId,
+      clientId,
+      providerId,
+      status: 'active',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    }).returning();
+
+    // Create welcome message
+    const request = await db.query.requests.findFirst({
+      where: eq(requests.id, requestId),
+      columns: { productName: true }
+    });
+
+    await db.insert(messages).values({
+      chatRoomId: chatRoom.id,
+      senderId: userId,
+      content: `Chat started for request: ${request?.productName || 'Unknown'}`,
+      isSystem: true,
+      read: false,
+      createdAt: new Date()
+    });
+
+    return c.json(chatRoom, 201);
+  } catch (error) {
+    console.error('Error creating chat room:', error);
+    return c.json({ 
+      error: 'Failed to create chat room',
       details: error instanceof Error ? error.message : 'Unknown error'
     }, 500);
   }

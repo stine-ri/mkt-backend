@@ -1,8 +1,8 @@
 // services/interests.ts
 import { Hono } from 'hono';
 import { db } from '../../drizzle/db.js';
-import { interests, requests, providers, users,  chatRooms } from '../../drizzle/schema.js';
-import { eq, and, count, exists } from 'drizzle-orm';
+import { interests, requests, providers, users,  chatRooms, messages } from '../../drizzle/schema.js';
+import { eq, and, count, exists, or } from 'drizzle-orm';
 import type { CustomContext } from '../../types/context.js';
 import { notifyUser } from '../../lib/notification.js';
 import {  sendRealTimeNotification} from '../../websocket.js';
@@ -307,12 +307,13 @@ app.delete('/:interestId', async (c) => {
 
 // Add endpoints for client to accept/reject interests
 
-app.post('/:interestId/accept', async (c) => {
+app.post('/interests/:interestId/accept', async (c) => {
   try {
     const interestId = Number(c.req.param('interestId'));
     const user = c.get('user');
+    const userId = Number(user.id);
 
-    // Verify interest exists and belongs to client's request
+    // 1. Find interest & validate ownership
     const interest = await db.query.interests.findFirst({
       where: and(
         eq(interests.id, interestId),
@@ -321,83 +322,92 @@ app.post('/:interestId/accept', async (c) => {
             .from(requests)
             .where(and(
               eq(requests.id, interests.requestId),
-              eq(requests.userId, Number(user.id))
+              eq(requests.userId, userId)
             ))
         )
       ),
       with: {
-        provider: {
-          with: {
-            user: true
-          }
-        },
-        request: true
+        provider: { columns: { userId: true } },
+        request: { columns: { id: true, userId: true, productName: true } }
       }
     });
 
-    if (!interest) {
-      return c.json({ error: 'Interest not found or unauthorized' }, 404);
+    if (!interest) return c.json({ error: 'Interest not found or unauthorized' }, 404);
+
+    // 2. Null checks for required properties
+    if (!interest.provider || !interest.request || interest.requestId === null) {
+      return c.json({ error: 'Invalid interest data' }, 400);
     }
 
-    // Validate required fields
-    if (!interest.requestId || !interest.providerId) {
-      return c.json({ error: 'Invalid request or provider data' }, 400);
+    if (interest.provider.userId === null || interest.request.userId === null) {
+      return c.json({ error: 'Invalid user data' }, 400);
     }
 
-    // Create chat room if it doesn't exist
-    let chatRoom = await db.query.chatRooms.findFirst({
+    // 3. Check for existing chat
+    const existingRoom = await db.query.chatRooms.findFirst({
       where: and(
-        eq(chatRooms.requestId, interest.requestId),
-        eq(chatRooms.clientId, Number(user.id)),
-        eq(chatRooms.providerId, interest.providerId)
+        eq(chatRooms.requestId, interest.requestId), // Now TypeScript knows this is not null
+        or(
+          and(
+            eq(chatRooms.clientId, interest.request.userId),
+            eq(chatRooms.providerId, interest.provider.userId)
+          ),
+          and(
+            eq(chatRooms.clientId, interest.provider.userId),
+            eq(chatRooms.providerId, interest.request.userId)
+          )
+        )
       )
     });
 
-    if (!chatRoom) {
+    let chatRoom;
+    if (existingRoom) {
+      chatRoom = existingRoom;
+    } else {
+      // 4. Create new chat room
       [chatRoom] = await db.insert(chatRooms).values({
         requestId: interest.requestId,
-        clientId: Number(user.id),
-        providerId: interest.providerId,
+        clientId: interest.request.userId,
+        providerId: interest.provider.userId,
         status: 'active',
         createdAt: new Date(),
         updatedAt: new Date()
       }).returning();
-    }
 
-    // Update interest status and link chat room
-    await db.update(interests)
-      .set({ 
-        status: 'accepted',
-        chatRoomId: chatRoom.id
-      })
-      .where(eq(interests.id, interestId));
-
-    // Notify provider
-    if (interest.provider?.user) {
-      await notifyUser(interest.provider.user.id, {
-        type: 'interest_accepted',
-        requestId: interest.requestId,
+      // 5. Create system welcome message
+      await db.insert(messages).values({
         chatRoomId: chatRoom.id,
-        isRead: false,
-        client: {
-          id: Number(user.id),
-          name: user.name,
-          avatar: user.avatar
-        }
+        senderId: userId,
+        content: `Chat started for request: ${interest.request.productName || 'Unknown'}`,
+        isSystem: true,
+        read: false,
+        createdAt: new Date()
       });
     }
 
-    return c.json({ 
-      success: true,
-      chatRoomId: chatRoom.id,
-      message: 'Interest accepted successfully'
+    // 6. Update interest
+    await db.update(interests)
+      .set({ status: 'accepted', chatRoomId: chatRoom.id })
+      .where(eq(interests.id, interestId));
+
+    // 7. Notify provider (fix null vs undefined issue)
+    await notifyUser(interest.provider.userId, {
+      type: 'interest_accepted',
+      requestId: interest.requestId ?? undefined, // Convert null to undefined if needed
+      chatRoomId: chatRoom.id
     });
+
+    return c.json(chatRoom, existingRoom ? 200 : 201);
 
   } catch (error) {
     console.error('Error accepting interest:', error);
-    return c.json({ error: 'Failed to accept interest' }, 500);
+    return c.json({
+      error: 'Failed to accept interest',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
   }
 });
+
 
 app.post('/:interestId/reject', async (c) => {
   try {
