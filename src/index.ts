@@ -18,6 +18,7 @@ import { db } from './drizzle/db.js';
 import publicProviderRoutes from './routes/provider/publicProvider.js';
 import chat from './services/chat.js';
 import product from './routes/provider/product.js'
+import adminBids from './routes/provider/adminBids.js'
 import { eq, and, or, gte, lte, inArray } from 'drizzle-orm';
 
 import * as schema from './drizzle/schema.js';
@@ -182,7 +183,8 @@ app.route('/', serviceRoutes);
 app.route('/', profileUploadHandler);
 app.route('/api/interests', interestRoutes);
 app.route('/api/chat', chat);
-app.route('/api/product', product)
+app.route('/api/product', product);
+app.route('./api/admin/bids', adminBids)
 // Mount public provider routes
 app.route('/api/provider/public', publicProviderRoutes);
 // PROTECTED Admin endpoints (CREATE/UPDATE/DELETE operations)
