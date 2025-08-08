@@ -3,7 +3,7 @@ import type { Context } from 'hono';
 import { db } from '../../drizzle/db.js';
 import { requests, providers, colleges, bids, notifications, interests,TSInterests,TSProviders, TSBids, TSRequests, TSUsers , users, services} from '../../drizzle/schema.js';
 import { eq, and, lte, gte, sql , desc,count,ilike,or } from 'drizzle-orm';
-import {authMiddleware, serviceProviderRoleAuth  } from '../../middleware/bearAuth.js';
+import {authMiddleware, serviceProviderRoleAuth,adminRoleAuth  } from '../../middleware/bearAuth.js';
 import type { CustomContext } from '../../types/context.js';
 import { notifyNearbyProviders } from '../../lib/providerNotifications.js';
 import { RouteError } from '../../utils/error.js'; 
@@ -11,7 +11,7 @@ import { RouteError } from '../../utils/error.js';
 const app = new Hono<CustomContext>();
 
 
-app.use('*', authMiddleware, serviceProviderRoleAuth);
+app.use('*', authMiddleware, serviceProviderRoleAuth,adminRoleAuth);
 
 // Get relevant requests for provider// Types for better error handling
 interface DatabaseError extends Error {
@@ -452,7 +452,7 @@ app.post('/', async (c) => {
 
 //admin fetch all requests
 
-app.get('/requests', async (c) => {
+app.get('/requests',  authMiddleware, adminRoleAuth, async (c) => {
   try {
     const { page = '1', limit = '20', status, search } = c.req.query();
 
