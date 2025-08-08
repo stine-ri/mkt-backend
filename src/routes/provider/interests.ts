@@ -313,40 +313,75 @@ app.post('/interests/:interestId/accept', async (c) => {
     const user = c.get('user');
     const userId = Number(user.id);
 
-    // 1. Find interest & validate ownership
-    const interest = await db.query.interests.findFirst({
-      where: and(
-        eq(interests.id, interestId),
-        exists(
-          db.select()
-            .from(requests)
-            .where(and(
-              eq(requests.id, interests.requestId),
-              eq(requests.userId, userId)
-            ))
-        )
-      ),
+    console.log('Accept interest request:', { interestId, userId });
+
+    // Debug: First, let's see if the interest exists at all
+    const interestExists = await db.query.interests.findFirst({
+      where: eq(interests.id, interestId),
       with: {
         provider: { columns: { userId: true } },
         request: { columns: { id: true, userId: true, productName: true } }
       }
     });
 
-    if (!interest) return c.json({ error: 'Interest not found or unauthorized' }, 404);
+    console.log('Interest exists check:', interestExists);
 
-    // 2. Null checks for required properties
-    if (!interest.provider || !interest.request || interest.requestId === null) {
+    if (!interestExists) {
+      return c.json({ error: 'Interest not found' }, 404);
+    }
+
+    // Debug: Check if the user owns the request
+    if (interestExists.requestId) {
+      const requestOwnership = await db.query.requests.findFirst({
+        where: and(
+          eq(requests.id, interestExists.requestId),
+          eq(requests.userId, userId)
+        )
+      });
+      console.log('Request ownership check:', requestOwnership);
+    }
+
+    // 1. Find interest & validate ownership with simplified query
+    const interest = await db.query.interests.findFirst({
+      where: eq(interests.id, interestId),
+      with: {
+        provider: { columns: { userId: true } },
+        request: { columns: { id: true, userId: true, productName: true } }
+      }
+    });
+
+    console.log('Interest found:', interest);
+
+    if (!interest) {
+      return c.json({ error: 'Interest not found' }, 404);
+    }
+
+    // 2. Validate that the current user owns the request
+    if (!interest.request || interest.request.userId !== userId) {
+      console.log('Authorization failed:', { 
+        requestUserId: interest.request?.userId, 
+        currentUserId: userId 
+      });
+      return c.json({ error: 'Unauthorized - you do not own this request' }, 403);
+    }
+
+    // 3. Null checks for required properties
+    if (!interest.provider || interest.requestId === null) {
+      console.log('Missing required data:', { 
+        hasProvider: !!interest.provider, 
+        requestId: interest.requestId 
+      });
       return c.json({ error: 'Invalid interest data' }, 400);
     }
 
-    if (interest.provider.userId === null || interest.request.userId === null) {
-      return c.json({ error: 'Invalid user data' }, 400);
+    if (interest.provider.userId === null) {
+      return c.json({ error: 'Invalid provider data' }, 400);
     }
 
-    // 3. Check for existing chat
+    // 4. Check for existing chat
     const existingRoom = await db.query.chatRooms.findFirst({
       where: and(
-        eq(chatRooms.requestId, interest.requestId), // Now TypeScript knows this is not null
+        eq(chatRooms.requestId, interest.requestId),
         or(
           and(
             eq(chatRooms.clientId, interest.request.userId),
@@ -360,11 +395,19 @@ app.post('/interests/:interestId/accept', async (c) => {
       )
     });
 
+    console.log('Existing room check:', existingRoom);
+
     let chatRoom;
     if (existingRoom) {
       chatRoom = existingRoom;
     } else {
-      // 4. Create new chat room
+      // 5. Create new chat room
+      console.log('Creating new chat room with:', {
+        requestId: interest.requestId,
+        clientId: interest.request.userId,
+        providerId: interest.provider.userId
+      });
+
       [chatRoom] = await db.insert(chatRooms).values({
         requestId: interest.requestId,
         clientId: interest.request.userId,
@@ -374,7 +417,7 @@ app.post('/interests/:interestId/accept', async (c) => {
         updatedAt: new Date()
       }).returning();
 
-      // 5. Create system welcome message
+      // 6. Create system welcome message
       await db.insert(messages).values({
         chatRoomId: chatRoom.id,
         senderId: userId,
@@ -385,18 +428,19 @@ app.post('/interests/:interestId/accept', async (c) => {
       });
     }
 
-    // 6. Update interest
+    // 7. Update interest
     await db.update(interests)
       .set({ status: 'accepted', chatRoomId: chatRoom.id })
       .where(eq(interests.id, interestId));
 
-    // 7. Notify provider (fix null vs undefined issue)
+    // 8. Notify provider
     await notifyUser(interest.provider.userId, {
       type: 'interest_accepted',
-      requestId: interest.requestId ?? undefined, // Convert null to undefined if needed
+      requestId: interest.requestId ?? undefined,
       chatRoomId: chatRoom.id
     });
 
+    console.log('Interest accepted successfully:', { chatRoomId: chatRoom.id });
     return c.json(chatRoom, existingRoom ? 200 : 201);
 
   } catch (error) {
