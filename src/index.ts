@@ -184,6 +184,7 @@ app.route('/', profileUploadHandler);
 app.route('api/interests', interestRoutes);
 app.route('/api/interests', interests);
 app.route('/api/chat', chat);
+app.route('/api/chat/', chat); 
 app.route('/api/product', product)
 // Mount public provider routes
 app.route('/api/provider/public', publicProviderRoutes);

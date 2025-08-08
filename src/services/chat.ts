@@ -21,11 +21,15 @@ type RoomWithProvider = {
 type User = typeof users.$inferSelect; // ✅ recommended
 
 // Get chat rooms for user
+
+// In services/chat.ts
 app.get('/', async (c) => {
   try {
     const user = c.get('user');
     const userId = Number(user.id);
+    console.log(`Current user ID: ${userId}`); 
 
+    // Use this query structure instead
     const rooms = await db.query.chatRooms.findMany({
       where: or(
         eq(chatRooms.clientId, userId),
@@ -59,11 +63,14 @@ app.get('/', async (c) => {
       },
       orderBy: [desc(chatRooms.updatedAt)]
     });
-
+   console.log(`Found ${rooms.length} rooms`);
     return c.json(rooms);
   } catch (error) {
-    console.error('Error fetching chat rooms:', error);
-    return c.json({ error: 'Failed to fetch chat rooms' }, 500);
+    console.error('Detailed error:', error);
+    return c.json({ 
+      error: 'Failed to fetch chat rooms',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
   }
 });
 

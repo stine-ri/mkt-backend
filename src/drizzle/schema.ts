@@ -292,21 +292,22 @@ export const messagesRelations = relations(messages, ({ one }) => ({
   }),
 }));
 
+
 export const chatRoomsRelations = relations(chatRooms, ({ many, one }) => ({
   messages: many(messages),
+  request: one(requests, {
+    fields: [chatRooms.requestId],
+    references: [requests.id],
+  }),
   client: one(users, {
     fields: [chatRooms.clientId],
     references: [users.id],
-    relationName: 'chatRoomClient'
+    relationName: 'chat_client' // Add relation name
   }),
   provider: one(users, {
     fields: [chatRooms.providerId],
     references: [users.id],
-    relationName: 'chatRoomProvider'
-  }),
-  request: one(requests, {
-    fields: [chatRooms.requestId],
-    references: [requests.id],
+    relationName: 'chat_provider' // Add relation name
   }),
 }));
 
