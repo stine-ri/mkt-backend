@@ -33,14 +33,13 @@ app.get('/', async (c) => {
         lastName: providers.lastName,
         email: users.email
       },
-request: {
-  id: requests.id,
-  productName: requests.productName,
-  description: requests.description,
-  status: requests.status,
-  serviceId: requests.serviceId // foreign key reference
-}
-
+      request: {
+        id: requests.id,
+        productName: requests.productName,
+        description: requests.description,
+        status: requests.status,
+        serviceId: requests.serviceId // foreign key reference
+      }
     })
     .from(bids)
     .leftJoin(providers, eq(bids.providerId, providers.id))
@@ -49,17 +48,16 @@ request: {
     .orderBy(desc(bids.createdAt));
 
     // Apply status filter if provided
-   if (status && ['pending', 'accepted', 'rejected'].includes(status)) {
-  query.where(eq(bids.status, status as 'pending' | 'accepted' | 'rejected'));
-}
-
+    if (status && ['pending', 'accepted', 'rejected'].includes(status)) {
+      query.where(eq(bids.status, status as 'pending' | 'accepted' | 'rejected'));
+    }
 
     // Apply pagination
-   const pageNum = typeof page === 'string' ? parseInt(page) : page;
-const limitNum = typeof limit === 'string' ? parseInt(limit) : limit;
+    const pageNum = typeof page === 'string' ? parseInt(page) : page;
+    const limitNum = typeof limit === 'string' ? parseInt(limit) : limit;
 
-const offset = (pageNum - 1) * limitNum;
-query.limit(limitNum).offset(offset);
+    const offset = (pageNum - 1) * limitNum;
+    query.limit(limitNum).offset(offset);
 
     const result = await query;
 
@@ -88,7 +86,25 @@ query.limit(limitNum).offset(offset);
  * Get bid details by ID
  */
 app.get('/:id', async (c) => {
-  const bidId = Number(c.req.param('id'));
+  const idParam = c.req.param('id');
+  
+  // Validate the ID parameter
+  if (!idParam) {
+    return c.json({ 
+      success: false, 
+      error: 'Bid ID is required' 
+    }, 400);
+  }
+
+  const bidId = parseInt(idParam, 10);
+  
+  // Check if the conversion resulted in a valid integer
+  if (isNaN(bidId) || bidId <= 0) {
+    return c.json({ 
+      success: false, 
+      error: 'Invalid bid ID. Must be a positive integer.' 
+    }, 400);
+  }
 
   try {
     const bid = await db.query.bids.findFirst({
@@ -110,19 +126,25 @@ app.get('/:id', async (c) => {
     });
 
     if (!bid) {
-      return c.json({ error: 'Bid not found' }, 404);
+      return c.json({ 
+        success: false, 
+        error: 'Bid not found' 
+      }, 404);
     }
 
     return c.json({ success: true, data: bid });
 
   } catch (error) {
     console.error('Error fetching bid:', error);
-    return c.json({ error: 'Failed to fetch bid' }, 500);
+    return c.json({ 
+      success: false, 
+      error: 'Failed to fetch bid',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
   }
 });
 
 //admin fetch all requests
-
 app.get('/requests', async (c) => {
   try {
     const { page = '1', limit = '20', status, search } = c.req.query();
@@ -247,4 +269,5 @@ app.get('/requests', async (c) => {
     }, 500);
   }
 });
+
 export default app;
