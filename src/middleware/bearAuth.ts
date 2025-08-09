@@ -16,7 +16,7 @@ export const verifyToken = async (token: string, secret: string) => {
 export const authMiddleware = async (c: Context<CustomContext>, next: Next) => {
   const publicRoutes = [
     '/public/all',
-    '/public/',  // This will match /public/:id routes
+    '/public/',  
     '/api/services',
     '/api/colleges',
     '/api/login',
@@ -25,7 +25,7 @@ export const authMiddleware = async (c: Context<CustomContext>, next: Next) => {
     '/api/register',
     '/api/provider/public',
     '/health',  // Health check route
-    // Add more public route paths here
+   ' /api/products'
   ];
 
   const path = c.req.path;
