@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { db } from '../../drizzle/db';
+import { db } from '../../drizzle/db.js';
 import { 
   interests, 
   providers, 
@@ -8,10 +8,10 @@ import {
   services,
   colleges,
   chatRooms
-} from '../../drizzle/schema';
+} from '../../drizzle/schema.js';
 import { and, eq, desc, ilike, or, count } from 'drizzle-orm';
-import { adminRoleAuth } from '../../middleware/bearAuth';
-import type { CustomContext } from '../../types/context';
+import { adminRoleAuth } from '../../middleware/bearAuth.js';
+import type { CustomContext } from '../../types/context.js';
 
 const app = new Hono<CustomContext>();
 
