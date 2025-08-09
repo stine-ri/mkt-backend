@@ -17,7 +17,7 @@ import interestRoutes from './routes/provider/interests.js'
 import { db } from './drizzle/db.js';
 import publicProviderRoutes from './routes/provider/publicProvider.js';
 import chat from './services/chat.js';
-import product from './routes/provider/product.js'
+import { product, publicProduct } from './routes/provider/product.js'
 import adminBids from './routes/provider/adminBids.js'
 import { eq, and, or, gte, lte, inArray } from 'drizzle-orm';
 
@@ -183,7 +183,12 @@ app.route('/', serviceRoutes);
 app.route('/', profileUploadHandler);
 app.route('/api/interests', interestRoutes);
 app.route('/api/chat', chat);
+
+// Protected routes
 app.route('/api/product', product);
+
+// Public routes
+app.route('/api/products', publicProduct);
 app.route('/api/admin/bids', adminBids)
 // Mount public provider routes
 app.route('/api/provider/public', publicProviderRoutes);
