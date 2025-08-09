@@ -21,7 +21,7 @@ import productRoutes from './routes/provider/product.js';
 import publicProductRoutes from './routes/provider/publicProducts.js';
 import adminBids from './routes/provider/adminBids.js'
 import adminRequests from './routes/provider/requests.js';
-import adminInterestsRoutes from './routes/provider/interests.js';
+import adminInterestsRoutes from './routes/provider/adminInterests.js';
 import { eq, and, or, gte, lte, inArray } from 'drizzle-orm';
 
 import * as schema from './drizzle/schema.js';
