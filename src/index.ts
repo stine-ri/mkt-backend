@@ -22,6 +22,7 @@ import publicProductRoutes from './routes/provider/publicProducts.js';
 import adminBids from './routes/provider/adminBids.js'
 import adminRequests from './routes/provider/requests.js';
 import adminInterestsRoutes from './routes/provider/adminInterests.js';
+import clientProducts from './routes/provider/clientProduct.js';
 import { eq, and, or, gte, lte, inArray } from 'drizzle-orm';
 
 import * as schema from './drizzle/schema.js';
@@ -198,6 +199,7 @@ app.route('/api/admin/requests', adminRequests);
 // Mount public provider routes
 app.route('/api/provider/public', publicProviderRoutes);
 app.route('/api/admin/interests', adminInterestsRoutes);
+app.route('/api/products', clientProducts);
 // PROTECTED Admin endpoints (CREATE/UPDATE/DELETE operations)
 app.post('/api/services', async (c) => {
   console.log('Protected route: POST /api/services accessed');
