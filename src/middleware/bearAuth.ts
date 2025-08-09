@@ -25,7 +25,8 @@ export const authMiddleware = async (c: Context<CustomContext>, next: Next) => {
     '/api/register',
     '/api/provider/public',
     '/health',  // Health check route
-   ' /api/products'
+    '/api/products',  
+    '/api/products/search'  
   ];
 
   const path = c.req.path;

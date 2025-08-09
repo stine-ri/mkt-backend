@@ -7,7 +7,7 @@ const serviceRoutes = new Hono();
 
 serviceRoutes.get('/api/services', async (c) => {
   try {
-    const search = c.req.query('search');
+    const search = c.req.query('q');
     
     // Debug: Log the incoming search parameter
     console.log('Search parameter:', search);
