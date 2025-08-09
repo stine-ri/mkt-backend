@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { eq, desc, ilike, or, and } from 'drizzle-orm';
-import { db } from '../../drizzle/db';
-import { products, productImages } from '../../drizzle/schema';
+import { db } from '../../drizzle/db.js';
+import { products, productImages } from '../../drizzle/schema.js';
 
 const publicProduct = new Hono();
 
