@@ -17,58 +17,39 @@ const clientProducts = new Hono()
 // Get all published products with filters
 clientProducts.get('/', async (c) => {
   const { search, category, minPrice, maxPrice, collegeId } = c.req.query();
-  
+
   try {
-    // 1. Build conditions array
+    // Build query conditions
     const conditions = [
       eq(products.status, 'published'),
       or(
-        isNull(products.stock),  // Include items with NULL stock
-        gte(products.stock, 1)   // Or stock >= 1
+        isNull(products.stock),
+        gte(products.stock, 1)
       )
     ];
 
-    // Add search filter if provided
-    if (search) {
-      conditions.push(
-        or(
-          ilike(products.name, `%${search}%`),
-          ilike(products.description, `%${search}%`),
-          ilike(products.category, `%${search}%`)
-        )
-      );
-    }
-
-    // Add category filter if provided
-    if (category) {
-      conditions.push(eq(products.category, category));
-    }
-
-    // Add price filters if provided
+    // Add filters
+    if (search) conditions.push(or(
+      ilike(products.name, `%${search}%`),
+      ilike(products.description, `%${search}%`),
+      ilike(products.category, `%${search}%`)
+    ));
+    if (category) conditions.push(eq(products.category, category));
     if (minPrice) {
       const min = parseFloat(minPrice);
-      if (!isNaN(min)) {
-        conditions.push(gte(products.price, min.toString()));
-      }
+      if (!isNaN(min)) conditions.push(gte(products.price, min.toString()));
     }
-
     if (maxPrice) {
       const max = parseFloat(maxPrice);
-      if (!isNaN(max)) {
-        conditions.push(lte(products.price, max.toString()));
-      }
+      if (!isNaN(max)) conditions.push(lte(products.price, max.toString()));
     }
-
-    // Add college filter if provided
     if (collegeId) {
       const college = parseInt(collegeId);
-      if (!isNaN(college)) {
-        conditions.push(eq(providers.collegeId, college));
-      }
+      if (!isNaN(college)) conditions.push(eq(providers.collegeId, college));
     }
 
-    // 2. First query - get products with provider info
-    const filteredProducts = await db.select({
+    // Get products with provider info
+    const productResults = await db.select({
       id: products.id,
       name: products.name,
       description: products.description,
@@ -76,7 +57,6 @@ clientProducts.get('/', async (c) => {
       category: products.category,
       stock: products.stock,
       createdAt: products.createdAt,
-      providerId: products.providerId, // Important for joining
       provider: {
         id: providers.id,
         firstName: providers.firstName,
@@ -91,84 +71,70 @@ clientProducts.get('/', async (c) => {
     .where(and(...conditions))
     .orderBy(desc(products.createdAt));
 
-    // Early return if no products found
-    if (filteredProducts.length === 0) {
-      return c.json([]);
-    }
+    if (productResults.length === 0) return c.json([]);
 
-    // 3. Second query - get all images for these products
-    const productIds = filteredProducts.map(p => p.id);
-    const imageData = await db.select({
+    // Get all images for these products
+    const productIds = productResults.map(p => p.id);
+    const imageResults = await db.select({
       productId: productImages.productId,
-      url: productImages.url,
-      isPrimary: productImages.isPrimary // Optional: for image ordering
+      url: productImages.url
     })
     .from(productImages)
     .where(inArray(productImages.productId, productIds));
 
-    // 4. Process and normalize image URLs
+    // Process image URLs
     const baseUrl = process.env.BASE_URL || 'https://mkt-backend-sz2s.onrender.com';
-    
-    // Type for the accumulator object
-    type ImagesByProduct = Record<number, string[]>;
-    
-    const imagesByProductId: ImagesByProduct = imageData.reduce(
-      (acc: ImagesByProduct, image: { productId: number; url: string; isPrimary: boolean | null }) => {
-        if (!acc[image.productId]) {
-          acc[image.productId] = [];
-        }
+    const imagesByProductId: Record<number, string[]> = {};
 
-        // Normalize URL format
-        let imageUrl = image.url;
-        if (!imageUrl.startsWith('http')) {
-          imageUrl = imageUrl.startsWith('/') 
-            ? `${baseUrl}${imageUrl}`
-            : `${baseUrl}/${imageUrl}`;
-        }
-
-        // Optional: prioritize primary images
-        if (image.isPrimary === true) {
-          acc[image.productId].unshift(imageUrl); // Put primary first
-        } else {
-          acc[image.productId].push(imageUrl);
-        }
-
-        return acc;
-      }, 
-      {} as ImagesByProduct
-    );
-
-    // 5. Combine products with their images
-    const result = filteredProducts.map(product => ({
-      ...product,
-      images: imagesByProductId[product.id] || [], // Ensure empty array if no images
-      provider: product.provider && {
-        ...product.provider,
-        // Normalize provider image URL as well
-        profileImageUrl: product.provider.profileImageUrl
-          ? product.provider.profileImageUrl.startsWith('http')
-            ? product.provider.profileImageUrl
-            : `${baseUrl}${product.provider.profileImageUrl}`
-          : undefined
+    imageResults.forEach(image => {
+      if (!imagesByProductId[image.productId]) {
+        imagesByProductId[image.productId] = [];
       }
-    }));
+      
+      const imageUrl = image.url.startsWith('http')
+        ? image.url
+        : `${baseUrl}${image.url.startsWith('/') ? '' : '/'}${image.url}`;
+      
+      imagesByProductId[image.productId].push(imageUrl);
+    });
 
-    // Debug logs (can remove in production)
-    console.log('Product 13 data:', result.find(p => p.id === 13));
-    console.log('Total products returned:', result.length);
+    // Combine products with their images
+   // Update the product mapping section with proper null checks
+const responseData = productResults.map(product => {
+  // Handle null provider case
+  const provider = product.provider ? {
+    id: product.provider.id,
+    firstName: product.provider.firstName,
+    lastName: product.provider.lastName,
+    rating: product.provider.rating,
+    collegeId: product.provider.collegeId,
+    profileImageUrl: product.provider.profileImageUrl
+      ? product.provider.profileImageUrl.startsWith('http')
+        ? product.provider.profileImageUrl
+        : `${baseUrl}${product.provider.profileImageUrl}`
+      : undefined
+  } : null;
 
-    return c.json(result);
-    
-  } catch (error) {
+  return {
+    id: product.id,
+    name: product.name,
+    description: product.description,
+    price: product.price,
+    category: product.category,
+    stock: product.stock,
+    createdAt: product.createdAt,
+    images: imagesByProductId[product.id] || [],
+    provider: provider
+  };
+});
+
+    return c.json(responseData);
+
+  } catch (error: unknown) {
     console.error('Error fetching products:', error);
-    
-    // Enhanced error response
-    return c.json({ 
+    return c.json({
       error: 'Failed to fetch products',
-      message: error instanceof Error ? error.message : 'Unknown error',
-      stack: process.env.NODE_ENV === 'development' 
-        ? error instanceof Error ? error.stack : undefined 
-        : undefined
+      message: error instanceof Error ? error.message : 'Unknown error'
     }, 500);
   }
 });

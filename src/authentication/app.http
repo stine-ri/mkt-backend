@@ -172,5 +172,3 @@ Content-Type: application/json
   }
 
 
-###
-curl https://mkt-backend-sz2s.onrender.com/api/product/debug-cloudinary
