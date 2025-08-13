@@ -24,6 +24,7 @@
     "@types/stripe": "^8.0.417",
     "axios": "^1.8.3",
     "bcrypt": "^5.1.1",
+    "cloudinary": "^2.7.0",
     "dotenv": "^16.4.7",
     "drizzle-orm": "^0.39.3",
     "hono": "^4.8.9",
