@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { eq, and, desc, ilike, or, gte, lte } from 'drizzle-orm';
+import { eq, and, desc, ilike, or, gte, lte, inArray } from 'drizzle-orm';
 import { db } from '../../drizzle/db.js';
 import { 
   products, 
@@ -64,8 +64,8 @@ clientProducts.get('/', async (c) => {
       }
     }
 
-    // Execute query with all conditions
-    const result = await db.select({
+    // First, get the filtered products without images
+    const filteredProducts = await db.select({
       id: products.id,
       name: products.name,
       description: products.description,
@@ -80,32 +80,45 @@ clientProducts.get('/', async (c) => {
         rating: providers.rating,
         collegeId: providers.collegeId,
         profileImageUrl: providers.profileImageUrl
-      },
-      images: {
-        url: productImages.url
       }
     })
     .from(products)
     .leftJoin(providers, eq(products.providerId, providers.id))
-    .leftJoin(productImages, eq(products.id, productImages.productId))
     .where(and(...conditions))
     .orderBy(desc(products.createdAt));
 
-    // Group images by product
-    const productsMap = new Map();
-    result.forEach(row => {
-      if (!productsMap.has(row.id)) {
-        productsMap.set(row.id, {
-          ...row,
-          images: []
-        });
-      }
-      if (row.images?.url) {
-        productsMap.get(row.id).images.push(row.images.url);
-      }
-    });
+    // If no products found, return early
+    if (filteredProducts.length === 0) {
+      return c.json([]);
+    }
 
-    return c.json(Array.from(productsMap.values()));
+    // Get product IDs for image fetching
+    const productIds = filteredProducts.map(p => p.id);
+
+    // Fetch images separately
+    const images = await db.select({
+      productId: productImages.productId,
+      url: productImages.url
+    })
+    .from(productImages)
+    .where(inArray(productImages.productId, productIds));
+
+    // Group images by product
+    const imagesByProduct = images.reduce((acc, img) => {
+      if (!acc[img.productId]) {
+        acc[img.productId] = [];
+      }
+      acc[img.productId].push(img.url);
+      return acc;
+    }, {} as Record<number, string[]>);
+
+    // Combine products with their images
+    const productsWithImages = filteredProducts.map(product => ({
+      ...product,
+      images: imagesByProduct[product.id] || []
+    }));
+
+    return c.json(productsWithImages);
   } catch (error) {
     console.error('Error fetching products:', error);
     return c.json({ error: 'Failed to fetch products' }, 500);

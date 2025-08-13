@@ -173,11 +173,4 @@ Content-Type: application/json
 
 
 ###
- curl -X POST http://localhost:3000/api/product \
-  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjQ0IiwiZW1haWwiOiJrYXNpcmVAZ21haWwuY29tIiwicm9sZSI6InNlcnZpY2VfcHJvdmlkZXIifQ.u0_Radaz56eCwVEZ76dUGbfYjdloNEAUPu_S_qYVQFM" \
-  -F "name=Test Product" \
-  -F "description=Test description" \
-  -F "price=19.99" \
-  -F "category=Test Category" \
-  -F "images=@/path/to/image1.jpg" \
-  -F "images=@/path/to/image2.jpg"
+curl https://mkt-backend-sz2s.onrender.com/api/product/debug-cloudinary

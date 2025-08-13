@@ -392,5 +392,4 @@ product.patch('/sales/:id', async (c) => {
   }
 });
 
-
 export default product;
