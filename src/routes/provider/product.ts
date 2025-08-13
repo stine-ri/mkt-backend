@@ -15,7 +15,7 @@ import {
   DatabaseError,
   ValidationError 
 } from '../../utils/error.js'; 
-import { uploadToCloudinary, deleteFromCloudinary } from '../../utils/cloudinary';
+import { uploadToCloudinary, deleteFromCloudinary } from '../../utils/cloudinary.js';
 
 const product = new Hono()
   .use('*', authMiddleware)
