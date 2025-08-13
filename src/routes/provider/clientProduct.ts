@@ -17,39 +17,58 @@ const clientProducts = new Hono()
 // Get all published products with filters
 clientProducts.get('/', async (c) => {
   const { search, category, minPrice, maxPrice, collegeId } = c.req.query();
-
+  
   try {
-    // Build query conditions
+    // 1. Build conditions array
     const conditions = [
       eq(products.status, 'published'),
       or(
-        isNull(products.stock),
-        gte(products.stock, 1)
+        isNull(products.stock),  // Include items with NULL stock
+        gte(products.stock, 1)   // Or stock >= 1
       )
     ];
 
-    // Add filters
-    if (search) conditions.push(or(
-      ilike(products.name, `%${search}%`),
-      ilike(products.description, `%${search}%`),
-      ilike(products.category, `%${search}%`)
-    ));
-    if (category) conditions.push(eq(products.category, category));
-    if (minPrice) {
-      const min = parseFloat(minPrice);
-      if (!isNaN(min)) conditions.push(gte(products.price, min.toString()));
-    }
-    if (maxPrice) {
-      const max = parseFloat(maxPrice);
-      if (!isNaN(max)) conditions.push(lte(products.price, max.toString()));
-    }
-    if (collegeId) {
-      const college = parseInt(collegeId);
-      if (!isNaN(college)) conditions.push(eq(providers.collegeId, college));
+    // Add search filter if provided
+    if (search) {
+      conditions.push(
+        or(
+          ilike(products.name, `%${search}%`),
+          ilike(products.description, `%${search}%`),
+          ilike(products.category, `%${search}%`)
+        )
+      );
     }
 
-    // Get products with provider info
-    const productResults = await db.select({
+    // Add category filter if provided
+    if (category) {
+      conditions.push(eq(products.category, category));
+    }
+
+    // Add price filters if provided
+    if (minPrice) {
+      const min = parseFloat(minPrice);
+      if (!isNaN(min)) {
+        conditions.push(gte(products.price, min.toString()));
+      }
+    }
+
+    if (maxPrice) {
+      const max = parseFloat(maxPrice);
+      if (!isNaN(max)) {
+        conditions.push(lte(products.price, max.toString()));
+      }
+    }
+
+    // Add college filter if provided
+    if (collegeId) {
+      const college = parseInt(collegeId);
+      if (!isNaN(college)) {
+        conditions.push(eq(providers.collegeId, college));
+      }
+    }
+
+    // 2. First query - get products with provider info
+    const filteredProducts = await db.select({
       id: products.id,
       name: products.name,
       description: products.description,
@@ -57,84 +76,136 @@ clientProducts.get('/', async (c) => {
       category: products.category,
       stock: products.stock,
       createdAt: products.createdAt,
-      provider: {
-        id: providers.id,
-        firstName: providers.firstName,
-        lastName: providers.lastName,
-        rating: providers.rating,
-        collegeId: providers.collegeId,
-        profileImageUrl: providers.profileImageUrl
-      }
+      providerId: products.providerId,
+      // Get provider fields individually to avoid nesting issues
+      providerFirstName: providers.firstName,
+      providerLastName: providers.lastName,
+      providerRating: providers.rating,
+      providerCollegeId: providers.collegeId,
+      providerProfileImageUrl: providers.profileImageUrl,
+      providerIdField: providers.id
     })
     .from(products)
     .leftJoin(providers, eq(products.providerId, providers.id))
     .where(and(...conditions))
     .orderBy(desc(products.createdAt));
 
-    if (productResults.length === 0) return c.json([]);
+    // Early return if no products found
+    if (filteredProducts.length === 0) {
+      return c.json([]);
+    }
 
-    // Get all images for these products
-    const productIds = productResults.map(p => p.id);
-    const imageResults = await db.select({
+    // 3. Second query - get all images for these products
+    const productIds = filteredProducts.map(p => p.id);
+    
+    console.log('=== IMAGE QUERY DEBUG ===');
+    console.log('Product IDs to query:', productIds);
+    console.log('Products found:', filteredProducts.length);
+    
+    // First, let's check if ANY images exist in the table
+    const allImages = await db.select({
       productId: productImages.productId,
-      url: productImages.url
+      url: productImages.url,
+      isPrimary: productImages.isPrimary
+    })
+    .from(productImages);
+    
+    console.log('Total images in database:', allImages.length);
+    console.log('All images:', allImages);
+    
+    const imageData = await db.select({
+      productId: productImages.productId,
+      url: productImages.url,
+      isPrimary: productImages.isPrimary
     })
     .from(productImages)
     .where(inArray(productImages.productId, productIds));
+    
+    console.log('Images for our products:', imageData);
+    console.log('Image query returned:', imageData.length, 'images');
 
-    // Process image URLs
+    // 4. Process and normalize image URLs
     const baseUrl = process.env.BASE_URL || 'https://mkt-backend-sz2s.onrender.com';
-    const imagesByProductId: Record<number, string[]> = {};
+    
+    // Type for the accumulator object
+    type ImagesByProduct = Record<number, string[]>;
+    
+    const imagesByProductId: ImagesByProduct = imageData.reduce(
+      (acc: ImagesByProduct, image: { productId: number; url: string; isPrimary: boolean | null }) => {
+        if (!acc[image.productId]) {
+          acc[image.productId] = [];
+        }
 
-    imageResults.forEach(image => {
-      if (!imagesByProductId[image.productId]) {
-        imagesByProductId[image.productId] = [];
-      }
+        // Normalize URL format - handle different storage methods
+        let imageUrl = image.url;
+        
+        // Skip invalid or empty URLs
+        if (!imageUrl || imageUrl.trim() === '') {
+          return acc;
+        }
+        
+        // If it's already a full URL (Cloudinary, AWS, etc.), use as is
+        if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+          // Cloudinary or other external URLs - use directly
+          acc[image.productId].push(imageUrl);
+        } else {
+          // Local file storage - normalize the path
+          // Remove leading slash if present to avoid double slashes
+          const cleanPath = imageUrl.startsWith('/') ? imageUrl.substring(1) : imageUrl;
+          const normalizedUrl = `${baseUrl}/${cleanPath}`;
+          acc[image.productId].push(normalizedUrl);
+        }
+
+        return acc;
+      }, 
+      {} as ImagesByProduct
+    );
+
+    // 5. Combine products with their images
+    const result = filteredProducts.map(product => {
+      const productImages = imagesByProductId[product.id] || [];
       
-      const imageUrl = image.url.startsWith('http')
-        ? image.url
-        : `${baseUrl}${image.url.startsWith('/') ? '' : '/'}${image.url}`;
-      
-      imagesByProductId[image.productId].push(imageUrl);
+      return {
+        ...product,
+        images: productImages, // For details view (all images)
+        image: productImages[0] || null, // For list view (primary/first image)
+        primaryImage: productImages[0] || null, // Alternative naming
+        imageUrl: productImages[0] || null, // Another common naming
+        provider: product.providerIdField ? {
+          id: product.providerIdField,
+          firstName: product.providerFirstName,
+          lastName: product.providerLastName,
+          rating: product.providerRating,
+          collegeId: product.providerCollegeId,
+          profileImageUrl: product.providerProfileImageUrl
+            ? product.providerProfileImageUrl.startsWith('http')
+              ? product.providerProfileImageUrl
+              : `${baseUrl}${product.providerProfileImageUrl}`
+            : null
+        } : null
+      };
     });
 
-    // Combine products with their images
-   // Update the product mapping section with proper null checks
-const responseData = productResults.map(product => {
-  // Handle null provider case
-  const provider = product.provider ? {
-    id: product.provider.id,
-    firstName: product.provider.firstName,
-    lastName: product.provider.lastName,
-    rating: product.provider.rating,
-    collegeId: product.provider.collegeId,
-    profileImageUrl: product.provider.profileImageUrl
-      ? product.provider.profileImageUrl.startsWith('http')
-        ? product.provider.profileImageUrl
-        : `${baseUrl}${product.provider.profileImageUrl}`
-      : undefined
-  } : null;
+    // Debug logs (can remove in production)
+    console.log('Filtered products count:', filteredProducts.length);
+    console.log('Product IDs being queried for images:', productIds);
+    console.log('Image data from database:', imageData);
+    console.log('Images grouped by product ID:', imagesByProductId);
+    console.log('Product 13 data:', result.find(p => p.id === 13));
+    console.log('Total products returned:', result.length);
 
-  return {
-    id: product.id,
-    name: product.name,
-    description: product.description,
-    price: product.price,
-    category: product.category,
-    stock: product.stock,
-    createdAt: product.createdAt,
-    images: imagesByProductId[product.id] || [],
-    provider: provider
-  };
-});
-
-    return c.json(responseData);
-
-  } catch (error: unknown) {
+    return c.json(result);
+    
+  } catch (error) {
     console.error('Error fetching products:', error);
-    return c.json({
+    
+    // Enhanced error response
+    return c.json({ 
       error: 'Failed to fetch products',
-      message: error instanceof Error ? error.message : 'Unknown error'
+      message: error instanceof Error ? error.message : 'Unknown error',
+      stack: process.env.NODE_ENV === 'development' 
+        ? error instanceof Error ? error.stack : undefined 
+        : undefined
     }, 500);
   }
 });
