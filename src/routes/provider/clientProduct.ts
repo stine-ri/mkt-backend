@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { eq, and, desc, ilike, or, gte, lte, inArray } from 'drizzle-orm';
+import { eq, and, desc, ilike, or, gte, lte, inArray,isNull } from 'drizzle-orm';
 import { db } from '../../drizzle/db.js';
 import { 
   products, 
@@ -19,13 +19,16 @@ clientProducts.get('/', async (c) => {
   const { search, category, minPrice, maxPrice, collegeId } = c.req.query();
   
   try {
-    // Build conditions array
+    // 1. Build conditions array
     const conditions = [
       eq(products.status, 'published'),
-      products.stock === null ? undefined : gte(products.stock, 1)
-    ].filter(Boolean); // Remove undefined conditions
+      or(
+        isNull(products.stock),  // Include items with NULL stock
+        gte(products.stock, 1)   // Or stock >= 1
+      )
+    ];
 
-    // Add search filter
+    // Add search filter if provided
     if (search) {
       conditions.push(
         or(
@@ -36,12 +39,12 @@ clientProducts.get('/', async (c) => {
       );
     }
 
-    // Add category filter
+    // Add category filter if provided
     if (category) {
       conditions.push(eq(products.category, category));
     }
 
-    // Add price filters
+    // Add price filters if provided
     if (minPrice) {
       const min = parseFloat(minPrice);
       if (!isNaN(min)) {
@@ -56,7 +59,7 @@ clientProducts.get('/', async (c) => {
       }
     }
 
-    // Add college filter
+    // Add college filter if provided
     if (collegeId) {
       const college = parseInt(collegeId);
       if (!isNaN(college)) {
@@ -64,7 +67,7 @@ clientProducts.get('/', async (c) => {
       }
     }
 
-    // FIXED: Get the filtered products without images first (this is working)
+    // 2. First query - get products with provider info
     const filteredProducts = await db.select({
       id: products.id,
       name: products.name,
@@ -73,6 +76,7 @@ clientProducts.get('/', async (c) => {
       category: products.category,
       stock: products.stock,
       createdAt: products.createdAt,
+      providerId: products.providerId, // Important for joining
       provider: {
         id: providers.id,
         firstName: providers.firstName,
@@ -87,82 +91,85 @@ clientProducts.get('/', async (c) => {
     .where(and(...conditions))
     .orderBy(desc(products.createdAt));
 
-    // If no products found, return early
+    // Early return if no products found
     if (filteredProducts.length === 0) {
       return c.json([]);
     }
 
-    // FIXED: Get product IDs for image fetching
+    // 3. Second query - get all images for these products
     const productIds = filteredProducts.map(p => p.id);
-
-    // FIXED: Fetch images separately with proper error handling
-    console.log('Fetching images for product IDs:', productIds); // Debug log
-    
-    const images = await db.select({
+    const imageData = await db.select({
       productId: productImages.productId,
       url: productImages.url,
-      id: productImages.id // Add this for debugging
+      isPrimary: productImages.isPrimary // Optional: for image ordering
     })
     .from(productImages)
     .where(inArray(productImages.productId, productIds));
 
-    console.log('Found images:', images); // Debug log
-
-    // FIXED: Group images by product with better error handling
-    const imagesByProduct = images.reduce((acc, img) => {
-      if (!acc[img.productId]) {
-        acc[img.productId] = [];
-      }
-      acc[img.productId].push(img.url);
-      return acc;
-    }, {} as Record<number, string[]>);
-
-    console.log('Images grouped by product:', imagesByProduct); // Debug log
-
-    // FIXED: Combine products with their images and ensure proper URL formatting
-    const productsWithImages = filteredProducts.map(product => {
-      const productImages = imagesByProduct[product.id] || [];
-      
-      // Format image URLs to be absolute if they're not already
-      const formattedImages = productImages.map(imageUrl => {
-        if (!imageUrl) return null;
-        
-        // If it's already an absolute URL, use it as is
-        if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-          return imageUrl;
-        }
-        
-        // If it's a Cloudflare URL or starts with a protocol, use as is
-        if (imageUrl.includes('cloudflare') || imageUrl.startsWith('//')) {
-          return imageUrl.startsWith('//') ? `https:${imageUrl}` : imageUrl;
-        }
-        
-        // For relative paths, prepend your base URL
-        const baseUrl = process.env.BASE_URL || 'https://mkt-backend-sz2s.onrender.com';
-        return imageUrl.startsWith('/') ? `${baseUrl}${imageUrl}` : `${baseUrl}/${imageUrl}`;
-      }).filter(url => url !== null); // Remove null URLs
-
-      return {
-        ...product,
-        images: formattedImages
-      };
-    });
-
-    console.log('Final products with formatted images:', productsWithImages); // Debug log
-
-    return c.json(productsWithImages);
+    // 4. Process and normalize image URLs
+    const baseUrl = process.env.BASE_URL || 'https://mkt-backend-sz2s.onrender.com';
     
-  }catch (error) {
+    // Type for the accumulator object
+    type ImagesByProduct = Record<number, string[]>;
+    
+    const imagesByProductId: ImagesByProduct = imageData.reduce(
+      (acc: ImagesByProduct, image: { productId: number; url: string; isPrimary: boolean | null }) => {
+        if (!acc[image.productId]) {
+          acc[image.productId] = [];
+        }
+
+        // Normalize URL format
+        let imageUrl = image.url;
+        if (!imageUrl.startsWith('http')) {
+          imageUrl = imageUrl.startsWith('/') 
+            ? `${baseUrl}${imageUrl}`
+            : `${baseUrl}/${imageUrl}`;
+        }
+
+        // Optional: prioritize primary images
+        if (image.isPrimary === true) {
+          acc[image.productId].unshift(imageUrl); // Put primary first
+        } else {
+          acc[image.productId].push(imageUrl);
+        }
+
+        return acc;
+      }, 
+      {} as ImagesByProduct
+    );
+
+    // 5. Combine products with their images
+    const result = filteredProducts.map(product => ({
+      ...product,
+      images: imagesByProductId[product.id] || [], // Ensure empty array if no images
+      provider: product.provider && {
+        ...product.provider,
+        // Normalize provider image URL as well
+        profileImageUrl: product.provider.profileImageUrl
+          ? product.provider.profileImageUrl.startsWith('http')
+            ? product.provider.profileImageUrl
+            : `${baseUrl}${product.provider.profileImageUrl}`
+          : undefined
+      }
+    }));
+
+    // Debug logs (can remove in production)
+    console.log('Product 13 data:', result.find(p => p.id === 13));
+    console.log('Total products returned:', result.length);
+
+    return c.json(result);
+    
+  } catch (error) {
     console.error('Error fetching products:', error);
-
-    if (error instanceof Error) {
-      console.error('Error details:', {
-        message: error.message,
-        stack: error.stack
-      });
-    }
-
-    return c.json({ error: 'Failed to fetch products' }, 500);
+    
+    // Enhanced error response
+    return c.json({ 
+      error: 'Failed to fetch products',
+      message: error instanceof Error ? error.message : 'Unknown error',
+      stack: process.env.NODE_ENV === 'development' 
+        ? error instanceof Error ? error.stack : undefined 
+        : undefined
+    }, 500);
   }
 });
 
