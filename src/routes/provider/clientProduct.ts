@@ -5,6 +5,7 @@ import {
   products, 
   productImages, 
   productSales,
+  colleges,
   users,
   providers
 } from '../../drizzle/schema.js';
@@ -18,6 +19,7 @@ const clientProducts = new Hono()
 
 clientProducts.get('/', async (c) => {
   const { search, category, minPrice, maxPrice, collegeId } = c.req.query();
+  const baseUrl = process.env.BASE_URL || 'https://mkt-backend-sz2s.onrender.com';
 
   try {
     // 1. Build query conditions
@@ -68,103 +70,86 @@ clientProducts.get('/', async (c) => {
       }
     }
 
-    // 2. Get products with provider info
-    const productResults = await db.select({
-      id: products.id,
-      name: products.name,
-      description: products.description,
-      price: products.price,
-      category: products.category,
-      stock: products.stock,
-      createdAt: products.createdAt,
-      providerId: products.providerId,
-      providerIdField: providers.id,
-      providerFirstName: providers.firstName,
-      providerLastName: providers.lastName,
-      providerRating: providers.rating,
-      providerCollegeId: providers.collegeId,
-      providerProfileImageUrl: providers.profileImageUrl
-    })
-    .from(products)
-    .leftJoin(providers, eq(products.providerId, providers.id))
-    .where(and(...conditions))
-    .orderBy(desc(products.createdAt));
+    // 2. Fetch products with their images and provider data
+    const results = await db
+      .select({
+        id: products.id,
+        name: products.name,
+        description: products.description,
+        price: products.price,
+        category: products.category,
+        stock: products.stock,
+        status: products.status,
+        createdAt: products.createdAt,
+        updatedAt: products.updatedAt,
+        providerId: products.providerId,
+        imageUrl: productImages.url,
+        providerFirstName: providers.firstName,
+        providerLastName: providers.lastName,
+        providerRating: providers.rating,
+        providerCollegeId: providers.collegeId,
+        providerProfileImageUrl: providers.profileImageUrl,
+        providerBio: providers.bio,
+        providerCompletedRequests: providers.completedRequests,
+        collegeName: colleges.name,
+        collegeLocation: colleges.location
+      })
+      .from(products)
+      .leftJoin(productImages, eq(products.id, productImages.productId))
+      .leftJoin(providers, eq(products.providerId, providers.id))
+      .leftJoin(colleges, eq(providers.collegeId, colleges.id))
+      .where(and(...conditions))
+      .orderBy(desc(products.createdAt));
 
-    if (productResults.length === 0) return c.json([]);
+    if (results.length === 0) {
+      return c.json([]);
+    }
 
-    // 3. Get all images for these products
-    const productIds = productResults.map(p => p.id);
-    console.log('Fetching images for product IDs:', productIds);
+    // 3. Group products with their images
+    const productsMap = new Map<number, any>();
     
-    const images = await db.select()
-      .from(productImages)
-      .where(inArray(productImages.productId, productIds));
-
-    console.log('Found images:', images);
-
-    // 4. Process image URLs
-    const baseUrl = process.env.BASE_URL || 'https://mkt-backend-sz2s.onrender.com';
-    const imagesByProductId: Record<number, string[]> = {};
-
-    images.forEach(img => {
-      if (!img.url) return;
-      
-      const productId = img.productId;
-      if (!imagesByProductId[productId]) {
-        imagesByProductId[productId] = [];
+    results.forEach(row => {
+      if (!productsMap.has(row.id)) {
+        productsMap.set(row.id, {
+          id: row.id,
+          name: row.name,
+          description: row.description,
+          price: row.price,
+          category: row.category,
+          stock: row.stock,
+          status: row.status,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+          providerId: row.providerId,
+          images: [],
+          provider: row.providerId ? {
+            id: row.providerId,
+            firstName: row.providerFirstName,
+            lastName: row.providerLastName,
+            rating: row.providerRating,
+            collegeId: row.providerCollegeId,
+            profileImageUrl: row.providerProfileImageUrl
+              ? normalizeUrl(row.providerProfileImageUrl, baseUrl)
+              : null,
+            bio: row.providerBio,
+            completedRequests: row.providerCompletedRequests,
+            college: row.collegeName ? {
+              name: row.collegeName,
+              location: row.collegeLocation
+            } : null
+          } : "Unknown Provider"
+        });
       }
 
-      // Handle URL formatting
-      let finalUrl = img.url;
-      
-      // If URL is already absolute, use as-is
-      if (img.url.startsWith('http')) {
-        imagesByProductId[productId].push(img.url);
-        return;
+      // Add image if it exists
+      if (row.imageUrl) {
+        const product = productsMap.get(row.id);
+        product.images.push(normalizeUrl(row.imageUrl, baseUrl));
       }
-      
-      // Ensure relative paths start with a slash
-      if (!img.url.startsWith('/')) {
-        finalUrl = `/${img.url}`;
-      }
-      
-      // Prepend base URL for relative paths
-      imagesByProductId[productId].push(`${baseUrl}${finalUrl}`);
     });
 
-    console.log('Processed images:', imagesByProductId);
-
-    // 5. Build the final response
-    const responseData = productResults.map(product => {
-      const provider = product.providerIdField ? {
-        id: product.providerIdField,
-        firstName: product.providerFirstName,
-        lastName: product.providerLastName,
-        rating: product.providerRating,
-        collegeId: product.providerCollegeId,
-        profileImageUrl: product.providerProfileImageUrl
-          ? product.providerProfileImageUrl.startsWith('http')
-            ? product.providerProfileImageUrl
-            : `${baseUrl}${product.providerProfileImageUrl.startsWith('/') 
-                ? product.providerProfileImageUrl 
-                : `/${product.providerProfileImageUrl}`}`
-          : null
-      } : null;
-
-      return {
-        id: product.id,
-        name: product.name,
-        description: product.description,
-        price: product.price,
-        category: product.category,
-        stock: product.stock,
-        status: 'published',
-        createdAt: product.createdAt,
-        updatedAt: product.createdAt,
-        images: imagesByProductId[product.id] || [],
-        provider: provider || "Unknown Provider"
-      };
-    });
+    // Convert map to array
+    const responseData = Array.from(productsMap.values());
 
     return c.json(responseData);
 
@@ -176,6 +161,22 @@ clientProducts.get('/', async (c) => {
     }, 500);
   }
 });
+
+// URL normalization helper function
+function normalizeUrl(url: string, baseUrl: string): string {
+  if (!url) return '';
+  
+  // Already absolute URL
+  if (url.startsWith('http')) return url;
+  
+  // Cloudinary URL (special case)
+  if (url.includes('res.cloudinary.com')) return url;
+  
+  // Ensure proper formatting for local paths
+  return url.startsWith('/')
+    ? `${baseUrl}${url}`
+    : `${baseUrl}/${url}`;
+}
 
 // Get product details
 clientProducts.get('/:id', async (c) => {
