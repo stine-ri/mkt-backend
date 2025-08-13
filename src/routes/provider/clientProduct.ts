@@ -15,8 +15,9 @@ import { ValidationError } from '../../utils/error.js';
 const clientProducts = new Hono()
   .use('*', authMiddleware);
 
-// Get all published products with filters
 
+
+// Get all published products with filters
 clientProducts.get('/', async (c) => {
   const { search, category, minPrice, maxPrice, collegeId } = c.req.query();
   const baseUrl = process.env.BASE_URL || 'https://mkt-backend-sz2s.onrender.com';
@@ -62,35 +63,17 @@ clientProducts.get('/', async (c) => {
       }
     }
 
-    // Add college filter
-    if (collegeId) {
-      const college = parseInt(collegeId);
-      if (!isNaN(college)) {
-        conditions.push(eq(providers.collegeId, college));
-      }
+    // Add college filter if valid collegeId is provided
+    if (collegeId && !isNaN(parseInt(collegeId))) {
+      conditions.push(eq(providers.collegeId, parseInt(collegeId)));
     }
 
-    // 2. Fetch products with their images and provider data
+    // 2. Fetch products with their relationships
     const results = await db
       .select({
-        id: products.id,
-        name: products.name,
-        description: products.description,
-        price: products.price,
-        category: products.category,
-        stock: products.stock,
-        status: products.status,
-        createdAt: products.createdAt,
-        updatedAt: products.updatedAt,
-        providerId: products.providerId,
+        product: products,
         imageUrl: productImages.url,
-        providerFirstName: providers.firstName,
-        providerLastName: providers.lastName,
-        providerRating: providers.rating,
-        providerCollegeId: providers.collegeId,
-        providerProfileImageUrl: providers.profileImageUrl,
-        providerBio: providers.bio,
-        providerCompletedRequests: providers.completedRequests,
+        provider: providers,
         collegeName: colleges.name,
         collegeLocation: colleges.location
       })
@@ -101,38 +84,27 @@ clientProducts.get('/', async (c) => {
       .where(and(...conditions))
       .orderBy(desc(products.createdAt));
 
-    if (results.length === 0) {
-      return c.json([]);
-    }
+    if (results.length === 0) return c.json([]);
 
     // 3. Group products with their images
     const productsMap = new Map<number, any>();
     
     results.forEach(row => {
-      if (!productsMap.has(row.id)) {
-        productsMap.set(row.id, {
-          id: row.id,
-          name: row.name,
-          description: row.description,
-          price: row.price,
-          category: row.category,
-          stock: row.stock,
-          status: row.status,
-          createdAt: row.createdAt,
-          updatedAt: row.updatedAt,
-          providerId: row.providerId,
+      if (!productsMap.has(row.product.id)) {
+        productsMap.set(row.product.id, {
+          ...row.product,
           images: [],
-          provider: row.providerId ? {
-            id: row.providerId,
-            firstName: row.providerFirstName,
-            lastName: row.providerLastName,
-            rating: row.providerRating,
-            collegeId: row.providerCollegeId,
-            profileImageUrl: row.providerProfileImageUrl
-              ? normalizeUrl(row.providerProfileImageUrl, baseUrl)
+          provider: row.provider ? {
+            id: row.provider.id,
+            firstName: row.provider.firstName,
+            lastName: row.provider.lastName,
+            rating: row.provider.rating,
+            collegeId: row.provider.collegeId,
+            profileImageUrl: row.provider.profileImageUrl
+              ? normalizeUrl(row.provider.profileImageUrl, baseUrl)
               : null,
-            bio: row.providerBio,
-            completedRequests: row.providerCompletedRequests,
+            bio: row.provider.bio,
+            completedRequests: row.provider.completedRequests,
             college: row.collegeName ? {
               name: row.collegeName,
               location: row.collegeLocation
@@ -141,17 +113,13 @@ clientProducts.get('/', async (c) => {
         });
       }
 
-      // Add image if it exists
       if (row.imageUrl) {
-        const product = productsMap.get(row.id);
+        const product = productsMap.get(row.product.id);
         product.images.push(normalizeUrl(row.imageUrl, baseUrl));
       }
     });
 
-    // Convert map to array
-    const responseData = Array.from(productsMap.values());
-
-    return c.json(responseData);
+    return c.json(Array.from(productsMap.values()));
 
   } catch (error: unknown) {
     console.error('Error in /api/products:', error);
@@ -161,6 +129,7 @@ clientProducts.get('/', async (c) => {
     }, 500);
   }
 });
+
 
 // URL normalization helper function
 function normalizeUrl(url: string, baseUrl: string): string {
