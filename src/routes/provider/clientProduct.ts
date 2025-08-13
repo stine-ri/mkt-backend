@@ -67,7 +67,7 @@ clientProducts.get('/', async (c) => {
       }
     }
 
-    // 2. Get products with provider info
+   // 2. Get products with provider info using a more reliable query structure
     const productResults = await db.select({
       id: products.id,
       name: products.name,
@@ -77,14 +77,13 @@ clientProducts.get('/', async (c) => {
       stock: products.stock,
       createdAt: products.createdAt,
       providerId: products.providerId,
-      provider: {
-        id: providers.id,
-        firstName: providers.firstName,
-        lastName: providers.lastName,
-        rating: providers.rating,
-        collegeId: providers.collegeId,
-        profileImageUrl: providers.profileImageUrl
-      }
+      // Get provider fields directly (not nested)
+      providerIdField: providers.id,
+      providerFirstName: providers.firstName,
+      providerLastName: providers.lastName,
+      providerRating: providers.rating,
+      providerCollegeId: providers.collegeId,
+      providerProfileImageUrl: providers.profileImageUrl
     })
     .from(products)
     .leftJoin(providers, eq(products.providerId, providers.id))
@@ -93,79 +92,88 @@ clientProducts.get('/', async (c) => {
 
     if (productResults.length === 0) return c.json([]);
 
-    // 3. Get all images for these products
+    // 3. Get all images for these products with better error handling
     const productIds = productResults.map(p => p.id);
     console.log('Fetching images for product IDs:', productIds);
     
     const imageResults = await db.select({
       productId: productImages.productId,
-      url: productImages.url,
-      isPrimary: productImages.isPrimary
+      url: productImages.url
     })
     .from(productImages)
     .where(inArray(productImages.productId, productIds));
 
     console.log('Found images:', imageResults);
 
-    // 4. Process image URLs
+    // 4. Process image URLs with comprehensive normalization
     const baseUrl = process.env.BASE_URL || 'https://mkt-backend-sz2s.onrender.com';
     const imagesByProductId: Record<number, string[]> = {};
 
     imageResults.forEach(image => {
+      if (!image.url) return; // Skip if no URL
+      
       if (!imagesByProductId[image.productId]) {
         imagesByProductId[image.productId] = [];
       }
-      
-      // Normalize URL - handle all cases
+
+      // Normalize all URL formats:
       let imageUrl = image.url;
-      if (!imageUrl) return; // Skip if empty
       
-      if (imageUrl.startsWith('http')) {
-        // Already absolute URL (Cloudinary, etc.)
+      // Case 1: Cloudinary URLs (keep as-is)
+      if (imageUrl.includes('res.cloudinary.com')) {
         imagesByProductId[image.productId].push(imageUrl);
-      } else if (imageUrl.startsWith('/uploads')) {
-        // Relative path starting with /uploads
+      }
+      // Case 2: Local uploads starting with /uploads
+      else if (imageUrl.startsWith('/uploads')) {
         imagesByProductId[image.productId].push(`${baseUrl}${imageUrl}`);
-      } else {
-        // Other relative paths
+      }
+      // Case 3: Other relative paths
+      else {
         imagesByProductId[image.productId].push(`${baseUrl}/${imageUrl}`);
       }
     });
 
     console.log('Images grouped by product:', imagesByProductId);
 
-    // 5. Combine products with their images
+    // 5. Build the final response with consistent structure
     const responseData = productResults.map(product => {
-      // Handle null provider case
-      const provider = product.provider ? {
-        ...product.provider,
-        profileImageUrl: product.provider.profileImageUrl
-          ? product.provider.profileImageUrl.startsWith('http')
-            ? product.provider.profileImageUrl
-            : `${baseUrl}${product.provider.profileImageUrl}`
-          : undefined
+      // Handle provider data (including null case)
+      const provider = product.providerIdField ? {
+        id: product.providerIdField,
+        firstName: product.providerFirstName,
+        lastName: product.providerLastName,
+        rating: product.providerRating,
+        collegeId: product.providerCollegeId,
+        profileImageUrl: product.providerProfileImageUrl
+          ? product.providerProfileImageUrl.startsWith('http')
+            ? product.providerProfileImageUrl
+            : `${baseUrl}${product.providerProfileImageUrl}`
+          : null
       } : null;
 
       return {
-        ...product,
-        images: imagesByProductId[product.id] || [], // All images
-        image: imagesByProductId[product.id]?.[0] || null, // Primary image
-        provider: provider
+        id: product.id,
+        name: product.name,
+        description: product.description,
+        price: product.price,
+        category: product.category,
+        stock: product.stock,
+        status: 'published',
+        createdAt: product.createdAt,
+        updatedAt: product.createdAt, // Using createdAt if updatedAt not available
+        images: imagesByProductId[product.id] || [], // Always an array
+        provider: provider || "Unknown Provider" // Consistent with your frontend
       };
     });
 
-    // Debug: Check specific product
+    // Debug: Verify Product 13 specifically
     const product13 = responseData.find(p => p.id === 13);
-    console.log('Product 13 data:', {
-      ...product13,
-      images: product13?.images?.length,
-      firstImage: product13?.images?.[0]
-    });
+    console.log('Product 13 final data:', product13);
 
     return c.json(responseData);
 
   } catch (error: unknown) {
-    console.error('Error fetching products:', error);
+    console.error('Error in /api/products:', error);
     return c.json({
       error: 'Failed to fetch products',
       message: error instanceof Error ? error.message : 'Unknown error'
