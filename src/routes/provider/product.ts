@@ -9,23 +9,19 @@ import {
   users
 } from '../../drizzle/schema.js';
 import { authMiddleware, serviceProviderRoleAuth } from '../../middleware/bearAuth.js';
-import { serveStatic } from '@hono/node-server/serve-static';
+
 import { 
   FileUploadError,
   DatabaseError,
   ValidationError 
 } from '../../utils/error.js'; 
-import { uploadFile, deleteFile  } from '../../utils/filestorage.js';
-
+import { uploadToCloudinary, deleteFromCloudinary } from '../../utils/cloudinary';
 
 const product = new Hono()
   .use('*', authMiddleware)
   .use('*', serviceProviderRoleAuth);
 
-  product.use('/uploads/*', serveStatic({ 
-    root: './',
-    rewriteRequestPath: (path) => path.replace(/^\/uploads\//, '/uploads/')
-  }));
+
 
 
 
@@ -115,8 +111,8 @@ product.post('/', async (c) => {
   let productId: number | null = null;
   let uploadedImageUrls: string[] = [];
 
-  try {
-    // Step 1: Create the product record
+   try {
+    // Step 1: Create the product record (same as before)
     const [product] = await db.insert(products).values({
       providerId,
       name,
@@ -129,14 +125,13 @@ product.post('/', async (c) => {
 
     productId = product.id;
 
-    // Step 2: Upload all images first (without database records)
+    // Step 2: Upload all images to Cloudinary
     const uploadResults = await Promise.allSettled(
       imageFiles.map(async (file) => {
         try {
-          const userPath = `providers/${providerId}/products/${productId}`;
-          const url = await uploadFile(file, userPath, c);
-          uploadedImageUrls.push(url);
-          return url;
+          const folderPath = `providers/${providerId}/products/${productId}`;
+          const { url, public_id } = await uploadToCloudinary(file, folderPath, c);
+          return { url, public_id };
         } catch (error) {
           console.error('Error uploading image:', error);
           throw new FileUploadError(`Failed to upload image: ${file.name}`);
@@ -153,11 +148,17 @@ product.post('/', async (c) => {
       );
     }
 
+    // Get successful uploads
+    const successfulUploads = uploadResults
+      .filter(r => r.status === 'fulfilled')
+      .map(r => (r as PromiseFulfilledResult<{ url: string, public_id: string }>).value);
+
     // Step 3: Create all image records in a single batch
     const imageRecords = await db.insert(productImages).values(
-      uploadedImageUrls.map(url => ({
+      successfulUploads.map(({ url, public_id }) => ({
         productId: productId!,
         url,
+        publicId: public_id // Store public_id for future deletion
       }))
     ).returning();
 
@@ -170,25 +171,30 @@ product.post('/', async (c) => {
     console.error('Error creating product:', error);
     
     // Cleanup if something failed after product creation
-if (productId) {
-  try {
-    // Delete the product if it was created
-    await db.delete(products).where(eq(products.id, productId));
-    
-    // Delete any uploaded files
-    await Promise.allSettled(
-      uploadedImageUrls.map(url => 
-        deleteFile(url).catch((e: Error) => {
-          console.error('Failed to delete file:', url, e.message);
-        })
-      )
-    );
-  } catch (cleanupError) {
-    console.error('Product deletion failed:', cleanupError instanceof Error 
-      ? cleanupError.message 
-      : 'Unknown error');
-  }
-}
+    if (productId) {
+      try {
+        // Delete the product if it was created
+        await db.delete(products).where(eq(products.id, productId));
+        
+        // Delete any uploaded files from Cloudinary
+        const imagesToDelete = await db.query.productImages.findMany({
+          where: eq(productImages.productId, productId),
+          columns: { publicId: true }
+        });
+        
+        await Promise.allSettled(
+          imagesToDelete.map(img => 
+            img.publicId ? deleteFromCloudinary(img.publicId, c).catch((e: Error) => {
+              console.error('Failed to delete file from Cloudinary:', e.message);
+            }) : Promise.resolve()
+          )
+        );
+      } catch (cleanupError) {
+        console.error('Product deletion failed:', cleanupError instanceof Error 
+          ? cleanupError.message 
+          : 'Unknown error');
+      }
+    }
     
     // Error response handling
     if (error instanceof ValidationError) {
@@ -256,24 +262,37 @@ product.patch('/:id/status', async (c) => {
 product.delete('/:id', async (c) => {
   const providerId = c.get('user').providerId;
   if (typeof providerId !== 'number') {
-  return c.json({ error: 'Invalid provider ID' }, 400);
-}
+    return c.json({ error: 'Invalid provider ID' }, 400);
+  }
+  
   const productId = parseInt(c.req.param('id'));
 
   try {
     await db.transaction(async (tx) => {
-      // Delete product images first
+      // 1. Get all images to delete from Cloudinary
+      const images = await tx.query.productImages.findMany({
+        where: eq(productImages.productId, productId),
+        columns: { publicId: true }
+      });
+
+      // 2. Delete from database first
       await tx.delete(productImages)
         .where(eq(productImages.productId, productId));
-
-      // Then delete product
+      
       await tx.delete(products)
-        .where(
-          and(
-            eq(products.id, productId),
-            eq(products.providerId, providerId)
-          )
-        );
+        .where(and(
+          eq(products.id, productId),
+          eq(products.providerId, providerId)
+        ));
+
+      // 3. Delete from Cloudinary after successful DB deletion
+      await Promise.allSettled(
+        images.map(img => 
+          img.publicId ? deleteFromCloudinary(img.publicId, c).catch((e: Error) => {
+            console.error('Failed to delete file from Cloudinary:', e.message);
+          }) : Promise.resolve()
+        )
+      );
     });
 
     return c.json({ message: 'Product deleted successfully' });

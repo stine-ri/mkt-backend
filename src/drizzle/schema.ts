@@ -207,6 +207,7 @@ export const products = pgTable('products', {
 export const productImages = pgTable('product_images', {
   id: serial('id').primaryKey(),
   productId: integer('product_id').notNull().references(() => products.id, { onDelete: 'cascade' }),
+  publicId: text('public_id'),
   url: text('url').notNull(),
   isPrimary: boolean('is_primary').default(false),
   createdAt: timestamp('created_at').notNull().defaultNow(),

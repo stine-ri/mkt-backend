@@ -6,16 +6,12 @@ import { eq, and,  or, like } from 'drizzle-orm';
 import { authMiddleware, serviceProviderRoleAuth } from '../../middleware/bearAuth.js';
 import type { CustomContext } from '../../types/context.js';
 import type { Service } from '../../types/types.js'; 
-import { uploadFile } from '../../utils/filestorage.js'; 
-import { serveStatic } from '@hono/node-server/serve-static';
-import { env } from 'hono/adapter';
+import { uploadToCloudinary, deleteFromCloudinary } from '../../utils/cloudinary';
+
 
 const app = new Hono<CustomContext>();
 
-app.use('/uploads/*', serveStatic({ 
-  root: './',
-  rewriteRequestPath: (path) => path.replace(/^\/uploads\//, '/uploads/')
-}));
+
 
 // Apply auth to all routes
 app.use('*', authMiddleware);
@@ -63,7 +59,7 @@ app.get('/',  serviceProviderRoleAuth, async (c: Context<CustomContext>) => {
     });
 });
 
-app.post('/upload', serviceProviderRoleAuth,  async (c) => {
+app.post('/upload', serviceProviderRoleAuth, async (c) => {
   try {
     const jwtUser = c.get('user') as { id: string };
     const userId = parseInt(jwtUser.id, 10);
@@ -86,10 +82,11 @@ app.post('/upload', serviceProviderRoleAuth,  async (c) => {
       return c.json({ error: 'Only JPEG, PNG, and WebP images are allowed' }, 400);
     }
 
-    // Upload the file (implement this function based on your storage solution)
-    const fileUrl = await uploadFile(file, `providers/${userId}`, c);
+    // Upload to Cloudinary instead of local storage
+    const folderPath = `providers/${userId}/profile`;
+    const { url } = await uploadToCloudinary(file, folderPath, c);
 
-    return c.json({ url: fileUrl });
+    return c.json({ url });
   } catch (error) {
     console.error('Error uploading file:', error);
     return c.json({ error: 'Failed to upload file' }, 500);
