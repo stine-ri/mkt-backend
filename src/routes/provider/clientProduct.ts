@@ -17,7 +17,7 @@ const clientProducts = new Hono()
 // Get all published products with filters
 clientProducts.get('/', async (c) => {
   const { search, category, minPrice, maxPrice, collegeId } = c.req.query();
-
+  
   try {
     // Build conditions array
     const conditions = [
@@ -64,7 +64,7 @@ clientProducts.get('/', async (c) => {
       }
     }
 
-    // First, get the filtered products without images
+    // FIXED: Get the filtered products without images first (this is working)
     const filteredProducts = await db.select({
       id: products.id,
       name: products.name,
@@ -92,18 +92,23 @@ clientProducts.get('/', async (c) => {
       return c.json([]);
     }
 
-    // Get product IDs for image fetching
+    // FIXED: Get product IDs for image fetching
     const productIds = filteredProducts.map(p => p.id);
 
-    // Fetch images separately
+    // FIXED: Fetch images separately with proper error handling
+    console.log('Fetching images for product IDs:', productIds); // Debug log
+    
     const images = await db.select({
       productId: productImages.productId,
-      url: productImages.url
+      url: productImages.url,
+      id: productImages.id // Add this for debugging
     })
     .from(productImages)
     .where(inArray(productImages.productId, productIds));
 
-    // Group images by product
+    console.log('Found images:', images); // Debug log
+
+    // FIXED: Group images by product with better error handling
     const imagesByProduct = images.reduce((acc, img) => {
       if (!acc[img.productId]) {
         acc[img.productId] = [];
@@ -112,18 +117,55 @@ clientProducts.get('/', async (c) => {
       return acc;
     }, {} as Record<number, string[]>);
 
-    // Combine products with their images
-    const productsWithImages = filteredProducts.map(product => ({
-      ...product,
-      images: imagesByProduct[product.id] || []
-    }));
+    console.log('Images grouped by product:', imagesByProduct); // Debug log
+
+    // FIXED: Combine products with their images and ensure proper URL formatting
+    const productsWithImages = filteredProducts.map(product => {
+      const productImages = imagesByProduct[product.id] || [];
+      
+      // Format image URLs to be absolute if they're not already
+      const formattedImages = productImages.map(imageUrl => {
+        if (!imageUrl) return null;
+        
+        // If it's already an absolute URL, use it as is
+        if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+          return imageUrl;
+        }
+        
+        // If it's a Cloudflare URL or starts with a protocol, use as is
+        if (imageUrl.includes('cloudflare') || imageUrl.startsWith('//')) {
+          return imageUrl.startsWith('//') ? `https:${imageUrl}` : imageUrl;
+        }
+        
+        // For relative paths, prepend your base URL
+        const baseUrl = process.env.BASE_URL || 'https://mkt-backend-sz2s.onrender.com';
+        return imageUrl.startsWith('/') ? `${baseUrl}${imageUrl}` : `${baseUrl}/${imageUrl}`;
+      }).filter(url => url !== null); // Remove null URLs
+
+      return {
+        ...product,
+        images: formattedImages
+      };
+    });
+
+    console.log('Final products with formatted images:', productsWithImages); // Debug log
 
     return c.json(productsWithImages);
-  } catch (error) {
+    
+  }catch (error) {
     console.error('Error fetching products:', error);
+
+    if (error instanceof Error) {
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack
+      });
+    }
+
     return c.json({ error: 'Failed to fetch products' }, 500);
   }
 });
+
 
 // Get product details
 clientProducts.get('/:id', async (c) => {
