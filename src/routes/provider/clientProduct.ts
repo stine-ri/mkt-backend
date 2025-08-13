@@ -141,25 +141,39 @@ clientProducts.get('/', async (c) => {
         
         // Skip invalid or empty URLs
         if (!imageUrl || imageUrl.trim() === '') {
+          console.log(`Skipping empty URL for product ${image.productId}`);
           return acc;
         }
         
         // If it's already a full URL (Cloudinary, AWS, etc.), use as is
         if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-          // Cloudinary or other external URLs - use directly
-          acc[image.productId].push(imageUrl);
+          console.log(`Using external URL for product ${image.productId}:`, imageUrl);
+          // Prioritize primary images
+          if (image.isPrimary === true) {
+            acc[image.productId].unshift(imageUrl);
+          } else {
+            acc[image.productId].push(imageUrl);
+          }
         } else {
           // Local file storage - normalize the path
-          // Remove leading slash if present to avoid double slashes
           const cleanPath = imageUrl.startsWith('/') ? imageUrl.substring(1) : imageUrl;
           const normalizedUrl = `${baseUrl}/${cleanPath}`;
-          acc[image.productId].push(normalizedUrl);
+          console.log(`Normalized local URL for product ${image.productId}:`, normalizedUrl);
+          
+          // Prioritize primary images
+          if (image.isPrimary === true) {
+            acc[image.productId].unshift(normalizedUrl);
+          } else {
+            acc[image.productId].push(normalizedUrl);
+          }
         }
 
         return acc;
       }, 
       {} as ImagesByProduct
     );
+    
+    console.log('Final imagesByProductId:', imagesByProductId);
 
     // 5. Combine products with their images
     const result = filteredProducts.map(product => {
@@ -209,7 +223,6 @@ clientProducts.get('/', async (c) => {
     }, 500);
   }
 });
-
 
 // Get product details
 clientProducts.get('/:id', async (c) => {
