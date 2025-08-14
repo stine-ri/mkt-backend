@@ -19,101 +19,159 @@ const clientProducts = new Hono()
 
 // Get all published products with filters
 // Fixed version of your products endpoint
+// Replace your entire GET '/' endpoint with this:
 clientProducts.get('/', async (c) => {
+  const { search, category, minPrice, maxPrice, collegeId } = c.req.query();
+  const baseUrl = process.env.BASE_URL || 'https://mkt-backend-sz2s.onrender.com';
+
   try {
-    // First, let's get products and their images with a raw query
-    const rawResults = await db.execute(sql`
-      SELECT 
-        p.id as product_id,
-        p.name,
-        p.description,
-        p.price,
-        p.category,
-        p.stock,
-        p.status,
-        p.created_at,
-        pi.url as image_url,
-        pr.id as provider_id,
-        pr.first_name,
-        pr.last_name,
-        pr.rating,
-        pr.college_id,
-        pr.profile_image_url,
-        pr.bio,
-        pr.completed_requests,
-        c.name as college_name,
-        c.location as college_location
-      FROM products p
-      LEFT JOIN product_images pi ON p.id = pi.product_id
-      LEFT JOIN providers pr ON p.provider_id = pr.id
-      LEFT JOIN colleges c ON pr.college_id = c.id
-      WHERE p.status = 'published'
-      AND (p.stock IS NULL OR p.stock >= 1)
-      ORDER BY p.created_at DESC
-    `);
-
-    console.log('Raw SQL results:', rawResults.rows.length);
-    console.log('First few rows:', rawResults.rows.slice(0, 3));
-
-    // Group the results
-    const productsMap = new Map();
+    // Build the WHERE conditions for the main query
+    const whereConditions = [];
     
-    rawResults.rows.forEach(row => {
-      const productId = row.product_id;
-      
-      if (!productsMap.has(productId)) {
-        productsMap.set(productId, {
-          id: productId,
-          name: row.name,
-          description: row.description,
-          price: row.price,
-          category: row.category,
-          stock: row.stock,
-          status: row.status,
-          createdAt: row.created_at,
-          images: [],
-          provider: {
-            id: row.provider_id,
-            firstName: row.first_name,
-            lastName: row.last_name,
-            rating: row.rating,
-            collegeId: row.college_id,
-            profileImageUrl: row.profile_image_url,
-            bio: row.bio,
-            completedRequests: row.completed_requests,
-            college: row.college_name ? {
-              name: row.college_name,
-              location: row.college_location
-            } : null
-          }
-        });
-      }
+    // Base conditions
+    whereConditions.push(eq(products.status, 'published'));
+    whereConditions.push(
+      or(
+        isNull(products.stock),
+        gte(products.stock, 1)
+      )
+    );
 
-      if (row.image_url) {
-        const product = productsMap.get(productId);
-        product.images.push(row.image_url);
+    // Search filter
+    if (search) {
+      whereConditions.push(
+        or(
+          ilike(products.name, `%${search}%`),
+          ilike(products.description, `%${search}%`),
+          ilike(products.category, `%${search}%`)
+        )
+      );
+    }
+
+    // Category filter
+    if (category) {
+      whereConditions.push(eq(products.category, category));
+    }
+
+    // Price filters
+    if (minPrice) {
+      const min = parseFloat(minPrice);
+      if (!isNaN(min)) {
+        whereConditions.push(gte(products.price, min.toString()));
+      }
+    }
+
+    if (maxPrice) {
+      const max = parseFloat(maxPrice);
+      if (!isNaN(max)) {
+        whereConditions.push(lte(products.price, max.toString()));
+      }
+    }
+
+    console.log('Fetching products with relations...');
+
+    // Use the SAME query pattern as your working detail endpoint
+    const productsWithRelations = await db.query.products.findMany({
+      where: and(...whereConditions),
+      orderBy: [desc(products.createdAt)],
+      with: {
+        images: {
+          columns: {
+            url: true
+          }
+        },
+        provider: {
+          columns: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            rating: true,
+            collegeId: true,
+            profileImageUrl: true,
+            bio: true,
+            completedRequests: true
+          },
+          with: {
+            college: {
+              columns: {
+                name: true,
+                location: true
+              }
+            }
+          }
+        }
       }
     });
 
-    const finalProducts = Array.from(productsMap.values());
-    console.log('Final grouped products:', finalProducts.map(p => ({
+    console.log(`Found ${productsWithRelations.length} products`);
+    console.log('Sample product images:', productsWithRelations.slice(0, 2).map(p => ({
       id: p.id,
       name: p.name,
-      imageCount: p.images.length
+      imageCount: p.images?.length || 0,
+      images: p.images?.map(img => img.url) || []
     })));
 
-    return c.json(finalProducts);
+    // Apply college filter if needed (post-query filtering)
+    let filteredProducts = productsWithRelations;
+    if (collegeId && !isNaN(parseInt(collegeId))) {
+      const targetCollegeId = parseInt(collegeId);
+      filteredProducts = productsWithRelations.filter(
+        product => product.provider?.collegeId === targetCollegeId
+      );
+      console.log(`Filtered to ${filteredProducts.length} products for college ${targetCollegeId}`);
+    }
 
-  } catch (error) {
-  console.error('Raw SQL error:', error);
-  
-  if (error instanceof Error) {
-    return c.json({ error: error.message }, 500);
+    // Transform the response to match your expected format
+    const transformedProducts = filteredProducts.map(product => {
+      const imageUrls = product.images.map(img => normalizeUrl(img.url, baseUrl));
+      
+      return {
+        id: product.id,
+        providerId: product.providerId,
+        name: product.name,
+        description: product.description,
+        price: product.price,
+        category: product.category,
+        stock: product.stock,
+        status: product.status,
+        createdAt: product.createdAt,
+        updatedAt: product.updatedAt,
+        images: imageUrls, // This is the key fix!
+        provider: product.provider ? {
+          id: product.provider.id,
+          firstName: product.provider.firstName,
+          lastName: product.provider.lastName,
+          rating: product.provider.rating,
+          collegeId: product.provider.collegeId,
+          profileImageUrl: product.provider.profileImageUrl
+            ? normalizeUrl(product.provider.profileImageUrl, baseUrl)
+            : null,
+          bio: product.provider.bio,
+          completedRequests: product.provider.completedRequests,
+          college: product.provider.college ? {
+            name: product.provider.college.name,
+            location: product.provider.college.location
+          } : null
+        } : "Unknown Provider"
+      };
+    });
+
+    console.log('Final response sample:', transformedProducts.slice(0, 2).map(p => ({
+      id: p.id,
+      name: p.name,
+      imageCount: p.images.length,
+      firstImage: p.images[0]
+    })));
+
+    return c.json(transformedProducts);
+
+  } catch (error: unknown) {
+    console.error('Error in /api/products:', error);
+    return c.json({
+      error: 'Failed to fetch products',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    }, 500);
   }
-
-  return c.json({ error: String(error) }, 500);
-}
-
 });
 
 // Make sure your normalizeUrl function is working correctly
