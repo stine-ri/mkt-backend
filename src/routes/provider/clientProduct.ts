@@ -16,10 +16,7 @@ const clientProducts = new Hono()
   .use('*', authMiddleware);
 
 
-
 // Get all published products with filters
-// COMPLETELY REPLACE your existing GET '/' endpoint with this entire block:
-
 clientProducts.get('/', async (c) => {
   const { search, category, minPrice, maxPrice, collegeId } = c.req.query();
   const baseUrl = process.env.BASE_URL || 'https://mkt-backend-sz2s.onrender.com';
@@ -174,7 +171,6 @@ clientProducts.get('/', async (c) => {
   }
 });
 
-
 // Make sure your normalizeUrl function is working correctly
 function normalizeUrl(url: string, baseUrl: string): string {
   if (!url) return '';
@@ -260,34 +256,62 @@ clientProducts.get('/:id', async (c) => {
 });
 
 // Create a new sale (purchase)
+// Enhanced backend endpoint with detailed error logging
 clientProducts.post('/:id/purchase', async (c) => {
   const user = c.get('user');
   const productId = parseInt(c.req.param('id'));
+  
+  console.log('=== Purchase Request Debug ===');
+  console.log('User:', user);
+  console.log('Product ID:', productId);
+  
   if (isNaN(productId)) {
+    console.log('ERROR: Invalid product ID');
     return c.json({ error: 'Invalid product ID' }, 400);
   }
 
-  const { quantity, paymentMethod, shippingAddress } = await c.req.json();
+  let requestBody;
+  try {
+    requestBody = await c.req.json();
+    console.log('Request body:', requestBody);
+  } catch (error) {
+    console.log('ERROR: Failed to parse request body:', error);
+    return c.json({ error: 'Invalid request body' }, 400);
+  }
+
+  const { quantity, paymentMethod, shippingAddress } = requestBody;
+
+  console.log('Parsed values:', { quantity, paymentMethod, shippingAddress });
 
   if (!quantity || quantity < 1) {
+    console.log('ERROR: Invalid quantity:', quantity);
     return c.json({ error: 'Invalid quantity' }, 400);
   }
 
   // Convert user.id to number if it's a string
   const customerId = typeof user.id === 'string' ? parseInt(user.id) : user.id;
+  console.log('Customer ID conversion:', { original: user.id, converted: customerId });
+  
   if (isNaN(customerId)) {
+    console.log('ERROR: Invalid user ID after conversion');
     return c.json({ error: 'Invalid user ID' }, 400);
   }
 
   // Ensure quantity is a number
   const purchaseQuantity = parseInt(quantity);
+  console.log('Quantity conversion:', { original: quantity, converted: purchaseQuantity });
+  
   if (isNaN(purchaseQuantity) || purchaseQuantity < 1) {
+    console.log('ERROR: Invalid quantity after conversion');
     return c.json({ error: 'Invalid quantity' }, 400);
   }
 
   try {
     // Start transaction
+    console.log('Starting database transaction...');
     const result = await db.transaction(async (tx) => {
+      console.log('Inside transaction - looking for product...');
+      
       // 1. Get product with lock to prevent race conditions
       const product = await tx.query.products.findFirst({
         where: and(
@@ -303,50 +327,99 @@ clientProducts.post('/:id/purchase', async (c) => {
         }
       });
 
+      console.log('Product found:', product);
+
       if (!product) {
+        console.log('ERROR: Product not found or not published');
         throw new ValidationError('Product not available');
       }
 
+      console.log('Provider info:', product.provider);
+
       // 2. Check stock if applicable
       if (product.stock !== null && product.stock < purchaseQuantity) {
+        console.log('ERROR: Insufficient stock:', { available: product.stock, requested: purchaseQuantity });
         throw new ValidationError('Insufficient stock');
       }
 
       // 3. Calculate total price
+      console.log('Product price (raw):', product.price);
       const price = parseFloat(product.price);
+      console.log('Product price (parsed):', price);
+      
       if (isNaN(price)) {
+        console.log('ERROR: Invalid product price');
         throw new ValidationError('Invalid product price');
       }
+      
       const totalPrice = (price * purchaseQuantity).toFixed(2);
+      console.log('Total price calculated:', totalPrice);
 
       // 4. Create sale record
+      console.log('Creating sale record with values:', {
+        productId: productId,
+        providerId: product.provider.id,
+        customerId: customerId,
+        quantity: purchaseQuantity,
+        totalPrice: totalPrice,
+        paymentMethod: paymentMethod,
+        shippingAddress: shippingAddress,
+        status: 'pending'
+      });
+
       const [sale] = await tx.insert(productSales).values({
         productId: productId,
         providerId: product.provider.id,
-        customerId: customerId, // Now guaranteed to be a number
-        quantity: purchaseQuantity, // Now guaranteed to be a number
-        totalPrice: totalPrice, // String representation of the decimal
+        customerId: customerId,
+        quantity: purchaseQuantity,
+        totalPrice: totalPrice,
         paymentMethod: paymentMethod,
         shippingAddress: shippingAddress,
         status: 'pending'
       }).returning();
 
+      console.log('Sale created:', sale);
+
       // 5. Update stock if applicable
       if (product.stock !== null) {
+        console.log('Updating stock from', product.stock, 'to', product.stock - purchaseQuantity);
         await tx.update(products)
           .set({ stock: product.stock - purchaseQuantity })
           .where(eq(products.id, productId));
+        console.log('Stock updated successfully');
       }
 
       return sale;
     });
 
+    console.log('Transaction completed successfully:', result);
     return c.json(result, 201);
+    
   } catch (error) {
-    console.error('Error processing purchase:', error);
-    if (error instanceof ValidationError) {
-      return c.json({ error: error.message }, 400);
+  console.error('=== DETAILED ERROR INFO ===');
+
+  if (error instanceof Error) {
+    console.error('Error type:', error.constructor.name);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+  } else {
+    console.error('Unknown error:', error);
+  }
+
+  console.error('===========================');
+
+  if (error instanceof ValidationError) {
+    return c.json({ error: error.message }, 400);
+  }
+
+  if (process.env.NODE_ENV === 'development' && error instanceof Error) {
+    return c.json({ 
+      error: 'Failed to process purchase', 
+      details: error.message,
+      stack: error.stack 
+    }, 500);
     }
+    
     return c.json({ error: 'Failed to process purchase' }, 500);
   }
 });
