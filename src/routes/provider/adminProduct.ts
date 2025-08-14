@@ -37,8 +37,21 @@ const productSchema = z.object({
 });
 
 // GET /api/admin/products - Get all products with provider and user info
+// GET /api/admin/products - Get all products with provider and user info
 router.get('/', async (c) => {
   try {
+    // Get pagination parameters from query
+    const { page = '1', limit = '10' } = c.req.query();
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const offset = (pageNum - 1) * limitNum;
+
+    // First get the total count
+    const totalCount = await db
+      .select({ count: count() })
+      .from(products);
+
+    // Then get the paginated results
     const productsWithDetails = await db
       .select({
         id: products.id,
@@ -63,33 +76,46 @@ router.get('/', async (c) => {
           email: users.email,
           contact_phone: users.contact_phone,
         },
-        images: sql<
-          Array<{
-            id: number;
-            url: string;
-            isPrimary: boolean;
-          }>
-        >`COALESCE(
-          (SELECT json_agg(json_build_object(
-            'id', pi.id,
-            'url', pi.url,
-            'isPrimary', pi.is_primary
-          )) 
-          FROM ${productImages} pi 
-          WHERE pi.product_id = ${products.id}
-        , '[]'::json)`,
+        images: sql<Array<{
+          id: number;
+          url: string;
+          isPrimary: boolean;
+        }>>`
+          (SELECT COALESCE(
+            json_agg(
+              json_build_object(
+                'id', pi.id,
+                'url', pi.url,
+                'isPrimary', pi.is_primary
+              )
+            ),
+            '[]'::json
+          )
+          FROM ${productImages} pi
+          WHERE pi.product_id = ${products.id})
+        `,
       })
       .from(products)
       .leftJoin(providers, eq(products.providerId, providers.id))
       .leftJoin(users, eq(providers.userId, users.id))
-      .orderBy(desc(products.createdAt));
+      .orderBy(desc(products.createdAt))
+      .limit(limitNum)
+      .offset(offset);
 
-    return c.json(productsWithDetails);
+    return c.json({
+      data: productsWithDetails,
+      pagination: {
+        total: totalCount[0].count,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(totalCount[0].count / limitNum),
+      },
+    });
   } catch (error) {
     console.error('Error fetching products:', error);
     throw new HTTPException(500, {
       message: 'Failed to fetch products',
-      cause: error,
+      cause: error instanceof Error ? error.message : 'Unknown error',
     });
   }
 });
