@@ -18,6 +18,7 @@ const clientProducts = new Hono()
 
 
 // Get all published products with filters
+// Fixed version of your products endpoint
 clientProducts.get('/', async (c) => {
   const { search, category, minPrice, maxPrice, collegeId } = c.req.query();
   const baseUrl = process.env.BASE_URL || 'https://mkt-backend-sz2s.onrender.com';
@@ -32,7 +33,7 @@ clientProducts.get('/', async (c) => {
       )
     ];
 
-    // Add search filter
+    // Add filters (keep your existing filter logic)
     if (search) {
       conditions.push(
         or(
@@ -43,12 +44,10 @@ clientProducts.get('/', async (c) => {
       );
     }
 
-    // Add category filter
     if (category) {
       conditions.push(eq(products.category, category));
     }
 
-    // Add price filters
     if (minPrice) {
       const min = parseFloat(minPrice);
       if (!isNaN(min)) {
@@ -63,63 +62,64 @@ clientProducts.get('/', async (c) => {
       }
     }
 
-    // Add college filter if valid collegeId is provided
     if (collegeId && !isNaN(parseInt(collegeId))) {
       conditions.push(eq(providers.collegeId, parseInt(collegeId)));
     }
 
-    // 2. Fetch products with their relationships
-    const results = await db
-      .select({
-        product: products,
-        imageUrl: productImages.url,
-        provider: providers,
-        collegeName: colleges.name,
-        collegeLocation: colleges.location
-      })
-      .from(products)
-      .leftJoin(productImages, eq(products.id, productImages.productId))
-      .leftJoin(providers, eq(products.providerId, providers.id))
-      .leftJoin(colleges, eq(providers.collegeId, colleges.id))
-      .where(and(...conditions))
-      .orderBy(desc(products.createdAt));
-
-    if (results.length === 0) return c.json([]);
-
-    // 3. Group products with their images
-    const productsMap = new Map<number, any>();
-    
-    results.forEach(row => {
-      if (!productsMap.has(row.product.id)) {
-        productsMap.set(row.product.id, {
-          ...row.product,
-          images: [],
-          provider: row.provider ? {
-            id: row.provider.id,
-            firstName: row.provider.firstName,
-            lastName: row.provider.lastName,
-            rating: row.provider.rating,
-            collegeId: row.provider.collegeId,
-            profileImageUrl: row.provider.profileImageUrl
-              ? normalizeUrl(row.provider.profileImageUrl, baseUrl)
-              : null,
-            bio: row.provider.bio,
-            completedRequests: row.provider.completedRequests,
-            college: row.collegeName ? {
-              name: row.collegeName,
-              location: row.collegeLocation
-            } : null
-          } : "Unknown Provider"
-        });
-      }
-
-      if (row.imageUrl) {
-        const product = productsMap.get(row.product.id);
-        product.images.push(normalizeUrl(row.imageUrl, baseUrl));
+    // 2. Use the relation-based query instead of manual JOIN
+    // This is more reliable and matches your working detail endpoint
+    const baseProducts = await db.query.products.findMany({
+      where: and(...conditions),
+      orderBy: [desc(products.createdAt)],
+      with: {
+        images: true, // Get all image fields, not just URL
+        provider: {
+          with: {
+            college: true
+          }
+        }
       }
     });
 
-    return c.json(Array.from(productsMap.values()));
+    console.log('Base products found:', baseProducts.length);
+    console.log('First product images:', baseProducts[0]?.images);
+
+    // 3. Transform to match your expected format
+    const transformedProducts = baseProducts.map(product => {
+      const imageUrls = product.images.map(img => normalizeUrl(img.url, baseUrl));
+      
+      console.log(`Product ${product.id} - Images: ${imageUrls.length}`, imageUrls);
+
+      return {
+        ...product,
+        images: imageUrls,
+        provider: product.provider ? {
+          id: product.provider.id,
+          firstName: product.provider.firstName,
+          lastName: product.provider.lastName,
+          rating: product.provider.rating,
+          collegeId: product.provider.collegeId,
+          profileImageUrl: product.provider.profileImageUrl
+            ? normalizeUrl(product.provider.profileImageUrl, baseUrl)
+            : null,
+          bio: product.provider.bio,
+          completedRequests: product.provider.completedRequests,
+          college: product.provider.college ? {
+            name: product.provider.college.name,
+            location: product.provider.college.location
+          } : null
+        } : "Unknown Provider"
+      };
+    });
+
+    console.log('Final transformed products:', transformedProducts.map(p => ({
+      id: p.id,
+      name: p.name,
+      imageCount: p.images.length,
+      hasProvider: !!p.provider
+    })));
+
+    return c.json(transformedProducts);
 
   } catch (error: unknown) {
     console.error('Error in /api/products:', error);
@@ -130,21 +130,32 @@ clientProducts.get('/', async (c) => {
   }
 });
 
-
-// URL normalization helper function
+// Make sure your normalizeUrl function is working correctly
 function normalizeUrl(url: string, baseUrl: string): string {
   if (!url) return '';
   
+  console.log('Normalizing URL:', { input: url, baseUrl });
+  
   // Already absolute URL
-  if (url.startsWith('http')) return url;
+  if (url.startsWith('http')) {
+    console.log('Already absolute:', url);
+    return url;
+  }
   
   // Cloudinary URL (special case)
-  if (url.includes('res.cloudinary.com')) return url;
+  if (url.includes('res.cloudinary.com')) {
+    const fullUrl = url.startsWith('https://') ? url : `https://${url}`;
+    console.log('Cloudinary URL:', fullUrl);
+    return fullUrl;
+  }
   
   // Ensure proper formatting for local paths
-  return url.startsWith('/')
+  const result = url.startsWith('/')
     ? `${baseUrl}${url}`
     : `${baseUrl}/${url}`;
+  
+  console.log('Local URL normalized:', result);
+  return result;
 }
 
 // Get product details
