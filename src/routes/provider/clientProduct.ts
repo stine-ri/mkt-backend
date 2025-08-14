@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { eq, and, desc, ilike, or, gte, lte, inArray,isNull } from 'drizzle-orm';
+import { eq, and, desc, ilike, or, gte, lte, inArray,isNull,sql } from 'drizzle-orm';
 import { db } from '../../drizzle/db.js';
 import { 
   products, 
@@ -20,114 +20,100 @@ const clientProducts = new Hono()
 // Get all published products with filters
 // Fixed version of your products endpoint
 clientProducts.get('/', async (c) => {
-  const { search, category, minPrice, maxPrice, collegeId } = c.req.query();
-  const baseUrl = process.env.BASE_URL || 'https://mkt-backend-sz2s.onrender.com';
-
   try {
-    // 1. Build query conditions
-    const conditions = [
-      eq(products.status, 'published'),
-      or(
-        isNull(products.stock),
-        gte(products.stock, 1)
-      )
-    ];
+    // First, let's get products and their images with a raw query
+    const rawResults = await db.execute(sql`
+      SELECT 
+        p.id as product_id,
+        p.name,
+        p.description,
+        p.price,
+        p.category,
+        p.stock,
+        p.status,
+        p.created_at,
+        pi.url as image_url,
+        pr.id as provider_id,
+        pr.first_name,
+        pr.last_name,
+        pr.rating,
+        pr.college_id,
+        pr.profile_image_url,
+        pr.bio,
+        pr.completed_requests,
+        c.name as college_name,
+        c.location as college_location
+      FROM products p
+      LEFT JOIN product_images pi ON p.id = pi.product_id
+      LEFT JOIN providers pr ON p.provider_id = pr.id
+      LEFT JOIN colleges c ON pr.college_id = c.id
+      WHERE p.status = 'published'
+      AND (p.stock IS NULL OR p.stock >= 1)
+      ORDER BY p.created_at DESC
+    `);
 
-    // Add filters (keep your existing filter logic)
-    if (search) {
-      conditions.push(
-        or(
-          ilike(products.name, `%${search}%`),
-          ilike(products.description, `%${search}%`),
-          ilike(products.category, `%${search}%`)
-        )
-      );
-    }
+    console.log('Raw SQL results:', rawResults.rows.length);
+    console.log('First few rows:', rawResults.rows.slice(0, 3));
 
-    if (category) {
-      conditions.push(eq(products.category, category));
-    }
-
-    if (minPrice) {
-      const min = parseFloat(minPrice);
-      if (!isNaN(min)) {
-        conditions.push(gte(products.price, min.toString()));
-      }
-    }
-
-    if (maxPrice) {
-      const max = parseFloat(maxPrice);
-      if (!isNaN(max)) {
-        conditions.push(lte(products.price, max.toString()));
-      }
-    }
-
-    if (collegeId && !isNaN(parseInt(collegeId))) {
-      conditions.push(eq(providers.collegeId, parseInt(collegeId)));
-    }
-
-    // 2. Use the relation-based query instead of manual JOIN
-    // This is more reliable and matches your working detail endpoint
-    const baseProducts = await db.query.products.findMany({
-      where: and(...conditions),
-      orderBy: [desc(products.createdAt)],
-      with: {
-        images: true, // Get all image fields, not just URL
-        provider: {
-          with: {
-            college: true
-          }
-        }
-      }
-    });
-
-    console.log('Base products found:', baseProducts.length);
-    console.log('First product images:', baseProducts[0]?.images);
-
-    // 3. Transform to match your expected format
-    const transformedProducts = baseProducts.map(product => {
-      const imageUrls = product.images.map(img => normalizeUrl(img.url, baseUrl));
+    // Group the results
+    const productsMap = new Map();
+    
+    rawResults.rows.forEach(row => {
+      const productId = row.product_id;
       
-      console.log(`Product ${product.id} - Images: ${imageUrls.length}`, imageUrls);
+      if (!productsMap.has(productId)) {
+        productsMap.set(productId, {
+          id: productId,
+          name: row.name,
+          description: row.description,
+          price: row.price,
+          category: row.category,
+          stock: row.stock,
+          status: row.status,
+          createdAt: row.created_at,
+          images: [],
+          provider: {
+            id: row.provider_id,
+            firstName: row.first_name,
+            lastName: row.last_name,
+            rating: row.rating,
+            collegeId: row.college_id,
+            profileImageUrl: row.profile_image_url,
+            bio: row.bio,
+            completedRequests: row.completed_requests,
+            college: row.college_name ? {
+              name: row.college_name,
+              location: row.college_location
+            } : null
+          }
+        });
+      }
 
-      return {
-        ...product,
-        images: imageUrls,
-        provider: product.provider ? {
-          id: product.provider.id,
-          firstName: product.provider.firstName,
-          lastName: product.provider.lastName,
-          rating: product.provider.rating,
-          collegeId: product.provider.collegeId,
-          profileImageUrl: product.provider.profileImageUrl
-            ? normalizeUrl(product.provider.profileImageUrl, baseUrl)
-            : null,
-          bio: product.provider.bio,
-          completedRequests: product.provider.completedRequests,
-          college: product.provider.college ? {
-            name: product.provider.college.name,
-            location: product.provider.college.location
-          } : null
-        } : "Unknown Provider"
-      };
+      if (row.image_url) {
+        const product = productsMap.get(productId);
+        product.images.push(row.image_url);
+      }
     });
 
-    console.log('Final transformed products:', transformedProducts.map(p => ({
+    const finalProducts = Array.from(productsMap.values());
+    console.log('Final grouped products:', finalProducts.map(p => ({
       id: p.id,
       name: p.name,
-      imageCount: p.images.length,
-      hasProvider: !!p.provider
+      imageCount: p.images.length
     })));
 
-    return c.json(transformedProducts);
+    return c.json(finalProducts);
 
-  } catch (error: unknown) {
-    console.error('Error in /api/products:', error);
-    return c.json({
-      error: 'Failed to fetch products',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    }, 500);
+  } catch (error) {
+  console.error('Raw SQL error:', error);
+  
+  if (error instanceof Error) {
+    return c.json({ error: error.message }, 500);
   }
+
+  return c.json({ error: String(error) }, 500);
+}
+
 });
 
 // Make sure your normalizeUrl function is working correctly
