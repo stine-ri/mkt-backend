@@ -18,17 +18,19 @@ const clientProducts = new Hono()
 
 
 // Get all published products with filters
-// Fixed version of your products endpoint
-// Replace your entire GET '/' endpoint with this:
+// COMPLETELY REPLACE your existing GET '/' endpoint with this entire block:
+
 clientProducts.get('/', async (c) => {
   const { search, category, minPrice, maxPrice, collegeId } = c.req.query();
   const baseUrl = process.env.BASE_URL || 'https://mkt-backend-sz2s.onrender.com';
 
+  console.log('=== NEW PRODUCTS ENDPOINT CALLED ===');
+  console.log('Filters:', { search, category, minPrice, maxPrice, collegeId });
+
   try {
-    // Build the WHERE conditions for the main query
+    // Build WHERE conditions
     const whereConditions = [];
     
-    // Base conditions
     whereConditions.push(eq(products.status, 'published'));
     whereConditions.push(
       or(
@@ -37,7 +39,6 @@ clientProducts.get('/', async (c) => {
       )
     );
 
-    // Search filter
     if (search) {
       whereConditions.push(
         or(
@@ -48,12 +49,10 @@ clientProducts.get('/', async (c) => {
       );
     }
 
-    // Category filter
     if (category) {
       whereConditions.push(eq(products.category, category));
     }
 
-    // Price filters
     if (minPrice) {
       const min = parseFloat(minPrice);
       if (!isNaN(min)) {
@@ -68,9 +67,9 @@ clientProducts.get('/', async (c) => {
       }
     }
 
-    console.log('Fetching products with relations...');
+    console.log('About to run relation-based query...');
 
-    // Use the SAME query pattern as your working detail endpoint
+    // Use relation-based query (same as detail endpoint)
     const productsWithRelations = await db.query.products.findMany({
       where: and(...whereConditions),
       orderBy: [desc(products.createdAt)],
@@ -103,76 +102,78 @@ clientProducts.get('/', async (c) => {
       }
     });
 
-    console.log(`Found ${productsWithRelations.length} products`);
-    console.log('Sample product images:', productsWithRelations.slice(0, 2).map(p => ({
-      id: p.id,
-      name: p.name,
-      imageCount: p.images?.length || 0,
-      images: p.images?.map(img => img.url) || []
-    })));
+    console.log(`✅ Query completed. Found ${productsWithRelations.length} products`);
+    
+    // Log first product to verify images
+    if (productsWithRelations.length > 0) {
+      const firstProduct = productsWithRelations[0];
+      console.log('First product sample:', {
+        id: firstProduct.id,
+        name: firstProduct.name,
+        imageCount: firstProduct.images?.length || 0,
+        imageUrls: firstProduct.images?.map(img => img.url) || []
+      });
+    }
 
-    // Apply college filter if needed (post-query filtering)
+    // Apply college filter if needed
     let filteredProducts = productsWithRelations;
     if (collegeId && !isNaN(parseInt(collegeId))) {
       const targetCollegeId = parseInt(collegeId);
       filteredProducts = productsWithRelations.filter(
         product => product.provider?.collegeId === targetCollegeId
       );
-      console.log(`Filtered to ${filteredProducts.length} products for college ${targetCollegeId}`);
+      console.log(`College filter applied: ${filteredProducts.length} products remain`);
     }
 
-    // Transform the response to match your expected format
-    const transformedProducts = filteredProducts.map(product => {
-      const imageUrls = product.images.map(img => normalizeUrl(img.url, baseUrl));
-      
-      return {
-        id: product.id,
-        providerId: product.providerId,
-        name: product.name,
-        description: product.description,
-        price: product.price,
-        category: product.category,
-        stock: product.stock,
-        status: product.status,
-        createdAt: product.createdAt,
-        updatedAt: product.updatedAt,
-        images: imageUrls, // This is the key fix!
-        provider: product.provider ? {
-          id: product.provider.id,
-          firstName: product.provider.firstName,
-          lastName: product.provider.lastName,
-          rating: product.provider.rating,
-          collegeId: product.provider.collegeId,
-          profileImageUrl: product.provider.profileImageUrl
-            ? normalizeUrl(product.provider.profileImageUrl, baseUrl)
-            : null,
-          bio: product.provider.bio,
-          completedRequests: product.provider.completedRequests,
-          college: product.provider.college ? {
-            name: product.provider.college.name,
-            location: product.provider.college.location
-          } : null
-        } : "Unknown Provider"
-      };
-    });
+    // Transform response
+    const transformedProducts = filteredProducts.map(product => ({
+      id: product.id,
+      providerId: product.providerId,
+      name: product.name,
+      description: product.description,
+      price: product.price,
+      category: product.category,
+      stock: product.stock,
+      status: product.status,
+      createdAt: product.createdAt,
+      updatedAt: product.updatedAt,
+      images: product.images.map(img => normalizeUrl(img.url, baseUrl)),
+      provider: product.provider ? {
+        id: product.provider.id,
+        firstName: product.provider.firstName,
+        lastName: product.provider.lastName,
+        rating: product.provider.rating,
+        collegeId: product.provider.collegeId,
+        profileImageUrl: product.provider.profileImageUrl
+          ? normalizeUrl(product.provider.profileImageUrl, baseUrl)
+          : null,
+        bio: product.provider.bio,
+        completedRequests: product.provider.completedRequests,
+        college: product.provider.college ? {
+          name: product.provider.college.name,
+          location: product.provider.college.location
+        } : null
+      } : "Unknown Provider"
+    }));
 
-    console.log('Final response sample:', transformedProducts.slice(0, 2).map(p => ({
+    console.log('Final response:', transformedProducts.map(p => ({
       id: p.id,
       name: p.name,
       imageCount: p.images.length,
-      firstImage: p.images[0]
+      firstImageUrl: p.images[0] || 'NO IMAGE'
     })));
 
     return c.json(transformedProducts);
 
-  } catch (error: unknown) {
-    console.error('Error in /api/products:', error);
+  } catch (error) {
+    console.error('❌ Error in new products endpoint:', error);
     return c.json({
       error: 'Failed to fetch products',
       message: error instanceof Error ? error.message : 'Unknown error'
     }, 500);
   }
 });
+
 
 // Make sure your normalizeUrl function is working correctly
 function normalizeUrl(url: string, baseUrl: string): string {

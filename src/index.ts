@@ -182,7 +182,7 @@ app.route('/api/provider/profile', providerProfile);
 app.route('/api/provider/requests', providerRequests);
 app.route('/api/provider/bids', providerBids);
 app.route('/api/colleges', collegesRoute);
-app.route('/api/client', clientRoutes);  // Fixed: added leading slash
+app.route('/api/client', clientRoutes);  
 app.route('/', serviceRoutes);
 app.route('/', profileUploadHandler);
 app.route('/api/interests', interestRoutes);
@@ -199,7 +199,7 @@ app.route('/api/admin/requests', adminRequests);
 // Mount public provider routes
 app.route('/api/provider/public', publicProviderRoutes);
 app.route('/api/admin/interests', adminInterestsRoutes);
-app.route('/api/products', clientProducts);
+app.route('/api/client/products', clientProducts);
 // PROTECTED Admin endpoints (CREATE/UPDATE/DELETE operations)
 app.post('/api/services', async (c) => {
   console.log('Protected route: POST /api/services accessed');
