@@ -1,25 +1,38 @@
 import { Hono } from 'hono';
 import { eq, desc, ilike, or, and } from 'drizzle-orm';
 import { db } from '../../drizzle/db.js';
-import { products, productImages } from '../../drizzle/schema.js';
+import { products, productImages, providers} from '../../drizzle/schema.js';
 
 const publicProduct = new Hono();
 
 // Public endpoint to get all published products
 publicProduct.get('/', async (c) => {
   try {
-    // Simple query based on your actual products schema
-    const result = await db.query.products.findMany({
-      where: eq(products.status, 'published'), // Only show published products
-      orderBy: [desc(products.createdAt)],
-      // Remove the 'with' clause since those relations don't exist in your schema
+    // Use the same pattern as your search endpoint to include images
+    const result = await db.select()
+      .from(products)
+      .leftJoin(productImages, eq(products.id, productImages.productId))
+      .where(eq(products.status, 'published'))
+      .orderBy(desc(products.createdAt));
+
+    // Group images by product (same logic as search endpoint)
+    const productsMap = new Map();
+    result.forEach(row => {
+      const product = row.products;
+      if (!productsMap.has(product.id)) {
+        productsMap.set(product.id, {
+          ...product,
+          images: []
+        });
+      }
+      if (row.product_images?.url) {
+        productsMap.get(product.id).images.push(row.product_images.url);
+      }
     });
 
-    // Since we don't have images and provider relations, format the data as is
-    const formatted = result.map((product) => ({
+    const formatted = Array.from(productsMap.values()).map((product) => ({
       ...product,
-      images: [], // Empty array since images relation doesn't exist
-      provider: 'Unknown Provider' // Default value since provider relation doesn't exist
+      provider: 'Unknown Provider' // Keep this default since provider relation doesn't exist
     }));
 
     return c.json(formatted);
@@ -51,7 +64,6 @@ publicProduct.get('/search', async (c) => {
         ilike(products.category, `%${search}%`)
       );
       
-      // Only push if searchCondition is not undefined
       if (searchCondition) {
         conditions.push(searchCondition);
       }
@@ -79,7 +91,12 @@ publicProduct.get('/search', async (c) => {
       }
     });
 
-    return c.json(Array.from(productsMap.values()));
+    const formatted = Array.from(productsMap.values()).map((product) => ({
+      ...product,
+      provider: 'Unknown Provider'
+    }));
+
+    return c.json(formatted);
   } catch (error) {
     console.error('Error searching products:', error);
     return c.json({ error: 'Failed to search products' }, 500);
