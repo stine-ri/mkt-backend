@@ -32,7 +32,7 @@ clientProducts.get('/', async (c) => {
     whereConditions.push(
       or(
         isNull(products.stock),
-        gte(products.stock, 1)
+        gte(products.stock, 0)
       )
     );
 
