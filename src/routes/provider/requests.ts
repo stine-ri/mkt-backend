@@ -144,119 +144,121 @@ app.get('/', async (c: Context<CustomContext>) => {
     const serviceIds = provider.services.map((s) => s.serviceId);
     console.log('🎯 Service IDs for provider:', serviceIds);
 
-    // Handle requests without location filtering
-   if (!lat || !lng) {
-  console.log('📍 No coordinates provided, fetching all requests without location filter');
-  
-  try {
-    const serviceFilterCondition = filterByServices === 'true' && serviceIds.length > 0
-      ? sql`AND r.service_id IN (${sql.join(serviceIds.map(id => sql`${id}`), sql`,`)})`
-      : sql``;
+    // Helper function to process location data
+    function processLocation(rawLocation: any) {
+      if (!rawLocation) return null;
 
-    const collegeFilterCondition = filterByServices === 'true' && provider.collegeId
-      ? sql`AND (r.college_filter_id IS NULL OR r.college_filter_id = ${provider.collegeId})`
-      : sql``;
-
-    console.log('🔍 Query filters:', {
-      serviceFilterApplied: filterByServices === 'true',
-      serviceIds: serviceIds,
-      collegeFilterApplied: filterByServices === 'true',
-      collegeId: provider.collegeId
-    });
-
-    const results = await db.execute(sql`
-      SELECT 
-        r.*,
-        CASE 
-      WHEN r.location IS NULL THEN NULL
-      WHEN jsonb_typeof(r.location::jsonb) = 'object' THEN 
-        CASE
-          -- Check for empty/zero location
-          WHEN (r.location::json->>'lat')::float = 0 AND 
-               (r.location::json->>'lng')::float = 0 AND
-               (r.location::json->>'address' IS NULL OR 
-                r.location::json->>'address' = 'Not specified') THEN NULL
-          ELSE json_build_object(
-            'lat', (r.location::json->>'lat')::float,
-            'lng', (r.location::json->>'lng')::float,
-            'address', COALESCE(
-              NULLIF(r.location::json->>'address', 'Not specified'),
-              NULL
-            )
-          )
-        END
-      ELSE NULL
-    END AS formatted_location,
-        u.email AS user_email, 
-        u.role AS user_role,
-        s.name AS service_name,
-        c.name AS college_name,
-        (
-          SELECT json_agg(b.*) FROM bids b WHERE b.request_id = r.id
-        ) AS bids,
-        (
-          SELECT json_agg(i.*) 
-          FROM interests i
-          LEFT JOIN providers p ON p.id = i.provider_id
-          WHERE i.request_id = r.id
-        ) AS interests
-      FROM requests r
-      LEFT JOIN users u ON u.user_id = r.user_id
-      LEFT JOIN services s ON s.id = r.service_id
-      LEFT JOIN colleges c ON c.id = r.college_filter_id
-      WHERE r.status = 'open'
-        ${serviceFilterCondition}
-        ${collegeFilterCondition}
-      ORDER BY r.created_at DESC
-      LIMIT 100
-    `);
-
-    console.log('✅ Non-location query successful:', {
-      rowCount: results.rows?.length || 0,
-      executionTime: Date.now() - startTime,
-      showingAllServices: filterByServices !== 'true'
-    });
-
-    // Format location field from formatted_location
-const formattedResults = results.rows.map(row => {
-  let location = null;
-
-  if (row.formatted_location) {
-    location = row.formatted_location;
-  } else if (row.location) {
-    try {
-      location = typeof row.location === 'object'
-        ? row.location
-        : typeof row.location === 'string'
-          ? JSON.parse(row.location)
-          : null;
-    } catch {
-      location = null;
+      try {
+        // Try to parse as JSON first
+        const parsed = JSON.parse(rawLocation);
+        
+        // Check if it has lat/lng properties
+        if (typeof parsed === 'object' && parsed !== null) {
+          // Check for empty/zero location
+          if (parsed.lat === 0 && parsed.lng === 0 && 
+              (!parsed.address || parsed.address === 'Not specified')) {
+            return null;
+          } else {
+            return {
+              lat: parsed.lat || null,
+              lng: parsed.lng || null,
+              address: parsed.address && parsed.address !== 'Not specified' ? parsed.address : null
+            };
+          }
+        } else {
+          return null;
+        }
+      } catch {
+        // If JSON parsing fails, treat as plain text address
+        return {
+          address: rawLocation,
+          lat: null,
+          lng: null
+        };
+      }
     }
-  }
 
-  return {
-    ...row,
-    location,
-  };
-});
+    // Handle requests without location filtering
+    if (!lat || !lng) {
+      console.log('📍 No coordinates provided, fetching all requests without location filter');
+      
+      try {
+        const serviceFilterCondition = filterByServices === 'true' && serviceIds.length > 0
+          ? sql`AND r.service_id IN (${sql.join(serviceIds.map(id => sql`${id}`), sql`,`)})`
+          : sql``;
 
-    return c.json(formattedResults);
+        const collegeFilterCondition = filterByServices === 'true' && provider.collegeId
+          ? sql`AND (r.college_filter_id IS NULL OR r.college_filter_id = ${provider.collegeId})`
+          : sql``;
 
-  } catch (dbError) {
-    console.error('❌ Database error in non-location query:', {
-      error: dbError,
-      serviceIds,
-      collegeId: provider.collegeId
-    });
-    throw new RouteError('Database query failed', 500, { 
-      query: 'non-location',
-      serviceIds,
-      collegeId: provider.collegeId 
-    });
-  }
-}
+        console.log('🔍 Query filters:', {
+          serviceFilterApplied: filterByServices === 'true',
+          serviceIds: serviceIds,
+          collegeFilterApplied: filterByServices === 'true',
+          collegeId: provider.collegeId
+        });
 
+        const results = await db.execute(sql`
+          SELECT 
+            r.*,
+            r.location as raw_location,
+            u.email AS user_email, 
+            u.role AS user_role,
+            s.name AS service_name,
+            c.name AS college_name,
+            (
+              SELECT json_agg(b.*) FROM bids b WHERE b.request_id = r.id
+            ) AS bids,
+            (
+              SELECT json_agg(i.*) 
+              FROM interests i
+              LEFT JOIN providers p ON p.id = i.provider_id
+              WHERE i.request_id = r.id
+            ) AS interests
+          FROM requests r
+          LEFT JOIN users u ON u.user_id = r.user_id
+          LEFT JOIN services s ON s.id = r.service_id
+          LEFT JOIN colleges c ON c.id = r.college_filter_id
+          WHERE r.status = 'open'
+            ${serviceFilterCondition}
+            ${collegeFilterCondition}
+          ORDER BY r.created_at DESC
+          LIMIT 100
+        `);
+
+        console.log('✅ Non-location query successful:', {
+          rowCount: results.rows?.length || 0,
+          executionTime: Date.now() - startTime,
+          showingAllServices: filterByServices !== 'true'
+        });
+
+        // Process the results and format location
+        const formattedResults = results.rows.map(row => {
+          const location = processLocation(row.raw_location);
+          
+          // Remove raw_location and add processed location
+          const { raw_location, ...cleanRow } = row;
+          return {
+            ...cleanRow,
+            location,
+          };
+        });
+
+        return c.json(formattedResults);
+
+      } catch (dbError) {
+        console.error('❌ Database error in non-location query:', {
+          error: dbError,
+          serviceIds,
+          collegeId: provider.collegeId
+        });
+        throw new RouteError('Database query failed', 500, { 
+          query: 'non-location',
+          serviceIds,
+          collegeId: provider.collegeId 
+        });
+      }
+    }
 
     // Handle requests with location filtering
     console.log('📍 Processing location-based query');
@@ -292,9 +294,11 @@ const formattedResults = results.rows.map(row => {
         ? sql`AND (r.college_filter_id IS NULL OR r.college_filter_id = ${provider.collegeId})`
         : sql``;
 
+      // Updated location-based query - also use raw_location approach
       const results = await db.execute(sql`
         SELECT 
           r.*, 
+          r.location as raw_location,
           u.email AS user_email, 
           u.role AS user_role,
           s.name AS service_name,
@@ -303,39 +307,60 @@ const formattedResults = results.rows.map(row => {
             SELECT json_agg(b.*) FROM bids b WHERE b.request_id = r.id
           ) AS bids,
           (
-            6371 * acos(
-              cos(radians(${numLat})) * 
-              cos(radians(COALESCE((r.location::json->>'lat')::float, 0))) * 
-              cos(radians(COALESCE((r.location::json->>'lng')::float, 0)) - radians(${numLng})) + 
-              sin(radians(${numLat})) * 
-              sin(radians(COALESCE((r.location::json->>'lat')::float, 0)))
-            )
-          ) AS distance_km
+            SELECT json_agg(i.*) 
+            FROM interests i
+            LEFT JOIN providers p ON p.id = i.provider_id
+            WHERE i.request_id = r.id
+          ) AS interests
         FROM requests r
         LEFT JOIN users u ON u.user_id = r.user_id
         LEFT JOIN services s ON s.id = r.service_id
         LEFT JOIN colleges c ON c.id = r.college_filter_id
         WHERE r.status = 'open'
-          AND jsonb_typeof(r.location::jsonb) = 'object'  -- Ensure location is valid JSON object
-          AND r.location::jsonb ? 'lat'                   -- Ensure has lat property
-          AND r.location::jsonb ? 'lng'                   -- Ensure has lng property
-          AND (
-            6371 * acos(
-              cos(radians(${numLat})) * 
-              cos(radians(COALESCE((r.location::json->>'lat')::float, 0))) * 
-              cos(radians(COALESCE((r.location::json->>'lng')::float, 0)) - radians(${numLng})) + 
-              sin(radians(${numLat})) * 
-              sin(radians(COALESCE((r.location::json->>'lat')::float, 0)))
-            )
-          ) <= ${numRange}
           ${serviceFilterCondition}
           ${collegeFilterCondition}
         ORDER BY r.created_at DESC
-        LIMIT 100
+        LIMIT 200
       `);
 
-      // Return data directly as array (fix for frontend .map() error)
-      return c.json(results.rows);
+      // Process results and filter by distance in JavaScript
+      const processedResults = results.rows
+        .map(row => {
+          const location = processLocation(row.raw_location);
+          const { raw_location, ...cleanRow } = row;
+          return {
+            ...cleanRow,
+            location,
+          };
+        })
+        .filter(row => {
+          // Only include rows with valid coordinates for distance filtering
+          if (!row.location || !row.location.lat || !row.location.lng) {
+            return false; // Skip requests without valid coordinates
+          }
+
+          // Calculate distance using Haversine formula
+          const R = 6371; // Earth's radius in kilometers
+          const dLat = (row.location.lat - numLat) * Math.PI / 180;
+          const dLng = (row.location.lng - numLng) * Math.PI / 180;
+          const a = 
+            Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(numLat * Math.PI / 180) * Math.cos(row.location.lat * Math.PI / 180) * 
+            Math.sin(dLng/2) * Math.sin(dLng/2);
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+          const distance = R * c;
+
+          return distance <= numRange;
+        })
+        .slice(0, 100); // Limit to 100 results
+
+      console.log('✅ Location-based query successful:', {
+        totalFound: results.rows?.length || 0,
+        afterDistanceFilter: processedResults.length,
+        executionTime: Date.now() - startTime
+      });
+
+      return c.json(processedResults);
 
     } catch (dbError) {
       console.error('❌ Database error in location-based query:', dbError);
@@ -368,8 +393,6 @@ const formattedResults = results.rows.map(row => {
     }, 500);
   }
 });
-
-
 
 ///interests
 
@@ -418,7 +441,6 @@ app.get('/', async (c) => {
   }
 });
 
-
 app.post('/', async (c) => {
   const userId = Number(c.get('user').id);
   const body = await c.req.json();
@@ -449,7 +471,5 @@ app.post('/', async (c) => {
 
   return c.json(request);
 });
-
-
 
 export default app;
