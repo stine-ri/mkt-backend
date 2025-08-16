@@ -11,6 +11,7 @@ import {
     date,
     time,
      jsonb,
+     index,
      numeric,
      pgEnum
   } from "drizzle-orm/pg-core";
@@ -19,6 +20,23 @@ import {
   // Enums
 export const roleEnum = pgEnum("role", ["admin", "service_provider", "client"]);
   
+// Support ticket status enum
+export const ticketStatusEnum = pgEnum('ticket_status', ['pending', 'in_progress', 'resolved']);
+
+// Support ticket priority enum
+export const ticketPriorityEnum = pgEnum('ticket_priority', ['low', 'medium', 'high']);
+
+// Support ticket category enum
+export const ticketCategoryEnum = pgEnum('ticket_category', [
+  'payment', 
+  'technical', 
+  'account', 
+  'listing', 
+  'dispute', 
+  'verification', 
+  'other'
+]);
+
   // Users Table
   export const users = pgTable("users", {
     id: serial("user_id").primaryKey(),
@@ -150,7 +168,11 @@ export const chatRooms = pgTable('chat_rooms', {
   status: text('status').notNull().default('active'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => ({
+  // Add the indexes here
+  clientIdIdx: index('idx_chat_rooms_client_id').on(table.clientId),
+  providerIdIdx: index('idx_chat_rooms_provider_id').on(table.providerId),
+}));
 
 
 export const messages = pgTable('messages', {
@@ -161,7 +183,11 @@ export const messages = pgTable('messages', {
   isSystem: boolean('is_system').notNull().default(false),
   read: boolean('read').notNull().default(false),
   createdAt: timestamp('created_at').notNull().defaultNow()
-});
+}, (table) => ({
+  // Add the indexes here
+  chatRoomIdIdx: index('idx_messages_chat_room_id').on(table.chatRoomId),
+  senderIdIdx: index('idx_messages_sender_id').on(table.senderId),
+}));
 
 export const paymentAgreements = pgTable('payment_agreements', {
   id: serial('id').primaryKey(),
@@ -228,6 +254,48 @@ export const productSales = pgTable('product_sales', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
+// Support tickets table
+export const supportTickets = pgTable('support_tickets', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').notNull().references(() => users.id),
+  title: varchar('title', { length: 255 }).notNull(),
+  issue: text('issue').notNull(),
+  category: ticketCategoryEnum('category').notNull(),
+  priority: ticketPriorityEnum('priority').default('medium').notNull(),
+  status: ticketStatusEnum('status').default('pending').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// Ticket responses table
+export const ticketResponses = pgTable('ticket_responses', {
+  id: serial('id').primaryKey(),
+  ticketId: integer('ticket_id').notNull().references(() => supportTickets.id),
+  userId: integer('user_id').notNull().references(() => users.id),
+  message: text('message').notNull(),
+  isAdminResponse: boolean('is_admin_response').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// Add relations
+export const supportTicketsRelations = relations(supportTickets, ({ many, one }) => ({
+  user: one(users, {
+    fields: [supportTickets.userId],
+    references: [users.id],
+  }),
+  responses: many(ticketResponses),
+}));
+
+export const ticketResponsesRelations = relations(ticketResponses, ({ one }) => ({
+  ticket: one(supportTickets, {
+    fields: [ticketResponses.ticketId],
+    references: [supportTickets.id],
+  }),
+  user: one(users, {
+    fields: [ticketResponses.userId],
+    references: [users.id],
+  }),
+}));
 
 // Product Relations
 export const productsRelations = relations(products, ({ many, one }) => ({
@@ -453,6 +521,13 @@ export type TSProductImages = typeof productImages.$inferSelect;
 
 export type TIProductSales = typeof productSales.$inferInsert;
 export type TSProductSales = typeof productSales.$inferSelect;
+
+
+export type TISupportTicket = typeof supportTickets.$inferInsert;
+export type TSSupportTicket = typeof supportTickets.$inferSelect;
+
+export type TITicketResponse = typeof ticketResponses.$inferInsert;
+export type TSTicketResponse = typeof ticketResponses.$inferSelect;
 
 // Extend the base request type to include relations
 export type TSRequestsWithRelations = TSRequests & {
