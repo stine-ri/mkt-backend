@@ -17,46 +17,54 @@ const app = new Hono<CustomContext>();
 app.use('*', authMiddleware);
 
 // Get provider profile
-app.get('/',  serviceProviderRoleAuth, async (c: Context<CustomContext>) => {
-    const jwtUser = c.get('user') as { id: string };
-    const userId = parseInt(jwtUser.id, 10);
-    
-    const provider = await db.query.providers.findFirst({
-        where: eq(providers.userId, userId),
-        with: {
-            college: true,
-            services: {
-                with: {
-                    service: true,
+app.get('/', serviceProviderRoleAuth, async (c: Context<CustomContext>) => {
+    try {
+        const jwtUser = c.get('user');
+        
+        // Use providerId directly since it's already a number
+        if (!jwtUser.providerId) {
+            return c.json({ error: 'Provider ID not found in token' }, 401);
+        }
+        
+        const provider = await db.query.providers.findFirst({
+            where: eq(providers.id, jwtUser.providerId), // Use providerId instead of userId
+            with: {
+                college: true,
+                services: {
+                    with: {
+                        service: true,
+                    },
                 },
             },
-        },
-    });
+        });
 
-    if (!provider) {
-        return c.json({ error: 'Profile not found' }, 404);
+        if (!provider) {
+            return c.json({ error: 'Profile not found' }, 404);
+        }
+
+        return c.json({
+            id: provider.id,
+            userId: provider.userId,
+            firstName: provider.firstName,
+            lastName: provider.lastName,
+            phoneNumber: provider.phoneNumber,
+            collegeId: provider.collegeId,
+            latitude: provider.latitude,
+            longitude: provider.longitude,
+            address: provider.address,
+            bio: provider.bio,
+            isProfileComplete: provider.isProfileComplete,
+            rating: provider.rating,
+            completedRequests: provider.completedRequests,
+            createdAt: provider.createdAt,
+            updatedAt: provider.updatedAt,
+            college: provider.college,
+            services: provider.services.map(ps => ps.service),
+        });
+    } catch (error) {
+        console.error('Error fetching profile:', error);
+        return c.json({ error: 'Internal server error' }, 500);
     }
-
-    // Return the same structure as PUT for consistency
-    return c.json({
-      id: provider.id,
-      userId: provider.userId,
-      firstName: provider.firstName,
-      lastName: provider.lastName,
-      phoneNumber: provider.phoneNumber,
-      collegeId: provider.collegeId,
-      latitude: provider.latitude,
-      longitude: provider.longitude,
-      address: provider.address,
-      bio: provider.bio,
-      isProfileComplete: provider.isProfileComplete,
-      rating: provider.rating,
-      completedRequests: provider.completedRequests,
-      createdAt: provider.createdAt,
-      updatedAt: provider.updatedAt,
-      college: provider.college,
-      services: provider.services.map(ps => ps.service),
-    });
 });
 
 app.post('/upload', serviceProviderRoleAuth, async (c) => {
