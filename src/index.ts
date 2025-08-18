@@ -55,17 +55,28 @@ interface ExtendedWebSocket extends WebSocket {
 const app = new Hono();
 
 // CORS configuration
-app.use(
-  cors({
-    origin: [
-      'http://localhost:5173',
-      'https://marketplace-frontend-delta-nine.vercel.app',
-    ],
-    credentials: true,
-    allowHeaders: ['Content-Type', 'Authorization'],
-    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  })
-);
+// Update your CORS middleware at the very top
+app.use('*', async (c, next) => {
+  // Handle OPTIONS requests first
+  if (c.req.method === 'OPTIONS') {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Origin': c.req.header('origin') || '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS, PATCH',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Credentials': 'true',
+        'Access-Control-Max-Age': '86400',
+      }
+    });
+  }
+  
+  await next();
+  
+  // Add CORS headers to all responses
+  c.header('Access-Control-Allow-Origin', c.req.header('origin') || '*');
+  c.header('Access-Control-Allow-Credentials', 'true');
+});
 
 
 // PUBLIC ROUTES (before auth middleware) - EXACT PATHS ONLY
@@ -371,22 +382,24 @@ const server = createServer(async (req, res) => {
       }
     }
 
-   // Convert Node's IncomingMessage (req) to a web ReadableStream
-function nodeStreamToWeb(req: IncomingMessage): ReadableStream<Uint8Array> {
-  const reader = Readable.toWeb(req) as ReadableStream<Uint8Array>;
-  return reader;
-}
+    // Convert Node's IncomingMessage (req) to a web ReadableStream
+    function nodeStreamToWeb(req: IncomingMessage): ReadableStream<Uint8Array> {
+      return Readable.toWeb(req) as ReadableStream<Uint8Array>;
+    }
 
-const request = new Request(`http://${req.headers.host}${req.url}`, {
-  method: req.method,
-  headers,
-  body: req.method !== 'GET' && req.method !== 'HEAD' ? nodeStreamToWeb(req) : undefined
-});
+    interface NodeRequestInit extends RequestInit {
+      duplex?: string;
+    }
+
+    const request = new Request(`http://${req.headers.host}${req.url}`, {
+      method: req.method,
+      headers,
+      body: req.method !== 'GET' && req.method !== 'HEAD' ? nodeStreamToWeb(req) : undefined,
+      duplex: 'half'
+    } as NodeRequestInit);
 
     // Handle the request with Hono
-    const response = await app.fetch(request, {
-      // Pass any additional context here
-    });
+    const response = await app.fetch(request);
 
     // Send the response back to the client
     res.writeHead(response.status, Object.fromEntries(response.headers.entries()));
