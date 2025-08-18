@@ -4,7 +4,7 @@ import { db } from '../../drizzle/db.js';
 import { interests, requests, providers, users,  chatRooms, messages } from '../../drizzle/schema.js';
 import { eq, and, count, exists, or } from 'drizzle-orm';
 import type { CustomContext } from '../../types/context.js';
-import { notifyUser } from '../../lib/notification.js';
+import { notifyUser } from '../../websocket.js';
 import {  sendRealTimeNotification} from '../../websocket.js';
 
 const app = new Hono<CustomContext>();

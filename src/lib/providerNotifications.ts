@@ -7,7 +7,7 @@ import {
   providerServices,
 } from '../drizzle/schema.js';
 import { and, eq, sql } from 'drizzle-orm';
-import sendNotification from './notification.js';
+import sendNotification from '../websocket.js';
 
 // Manually extend request type to include optional latitude and longitude
 export async function notifyNearbyProviders(
