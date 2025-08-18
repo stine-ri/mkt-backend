@@ -28,7 +28,8 @@ import adminInterestsRoutes from './routes/provider/adminInterests.js';
 import clientProducts from './routes/provider/clientProduct.js';
 import adminProduct from './routes/provider/adminProduct.js';
 import supportRoutes from './routes/provider/support.js';
-import notifications from './routes/provider/notifications.js'
+import notifications from './routes/provider/notifications.js';
+import testimonialsRouter from './routes/provider/testimonials.js';
 import { Readable } from 'stream';
 
 import { eq, and, or, gte, lte, inArray } from 'drizzle-orm';
@@ -242,6 +243,7 @@ app.route('/api/client/products', clientProducts);
 app.route('/api/admin/product', adminProduct )
 app.route('/api/support', supportRoutes);
 app.route('/api/notifications', notifications)
+app.route('/api/testimonials', testimonialsRouter);
 
 // PROTECTED Admin endpoints (CREATE/UPDATE/DELETE operations)
 app.post('/api/services', async (c) => {

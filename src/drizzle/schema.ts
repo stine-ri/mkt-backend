@@ -36,7 +36,8 @@ export const ticketCategoryEnum = pgEnum('ticket_category', [
   'verification', 
   'other'
 ]);
-
+//testimonials enum 
+export const testimonialStatusEnum = pgEnum('testimonial_status', ['pending', 'approved', 'rejected']);
   // Users Table
   export const users = pgTable("users", {
     id: serial("user_id").primaryKey(),
@@ -276,7 +277,41 @@ export const ticketResponses = pgTable('ticket_responses', {
   isAdminResponse: boolean('is_admin_response').notNull(),
   createdAt: timestamp('created_at').defaultNow(),
 });
-
+//  testimonials table 
+export const testimonials = pgTable('testimonials', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  requestId: integer('request_id').references(() => requests.id, { onDelete: 'cascade' }).notNull(),
+  providerId: integer('provider_id').references(() => providers.id, { onDelete: 'set null' }),
+  
+  // User details (cached for consistency)
+  userName: varchar('user_name', { length: 255 }).notNull(),
+  userEmail: varchar('user_email', { length: 255 }),
+  userRole: roleEnum('user_role').notNull().default('client'),
+  userAvatarUrl: varchar('user_avatar_url', { length: 500 }),
+  
+  // Review content
+  rating: integer('rating').notNull(), // 1-5 stars
+  reviewText: text('review_text').notNull(),
+  serviceCategory: varchar('service_category', { length: 255 }),
+  serviceName: varchar('service_name', { length: 255 }),
+  
+  // Moderation
+  status: testimonialStatusEnum('status').default('pending').notNull(),
+  isPublic: boolean('is_public').default(true),
+  moderatedBy: integer('moderated_by').references(() => users.id),
+  moderationNotes: text('moderation_notes'),
+  
+  // Timestamps
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => ({
+  // Add indexes for performance
+  userIdIdx: index('idx_testimonials_user_id').on(table.userId),
+  requestIdIdx: index('idx_testimonials_request_id').on(table.requestId),
+  statusPublicIdx: index('idx_testimonials_status_public').on(table.status, table.isPublic),
+  createdAtIdx: index('idx_testimonials_created_at').on(table.createdAt),
+}));
 // Add relations
 export const supportTicketsRelations = relations(supportTickets, ({ many, one }) => ({
   user: one(users, {
@@ -347,6 +382,8 @@ export const userRelations = relations(users, ({ many }) => ({
     sentMessages: many(messages, { relationName: 'messageSender' }),
   clientChats: many(chatRooms, { relationName: 'chatRoomClient' }),
   providerChats: many(chatRooms, { relationName: 'chatRoomProvider' }),
+  testimonials: many(testimonials),
+  moderatedTestimonials: many(testimonials, { relationName: 'moderatedTestimonials' }),
 }));
 
 export const messagesRelations = relations(messages, ({ one }) => ({
@@ -393,6 +430,7 @@ export const providerRelations = relations(providers, ({ many, one }) => ({
   bids: many(bids),
   interests: many(interests),
   pastWorks: many(pastWorks), 
+  testimonials: many(testimonials),
 }));
 
 export const collegeRelations = relations(colleges, ({ many }) => ({
@@ -431,6 +469,7 @@ export const requestsRelations = relations(requests, ({ one, many }) => ({
   }),
   interests: many(interests),
   bids: many(bids),
+  testimonials: many(testimonials),
   // Handle the circular dependency through relations
   acceptedBid: one(bids, {
     fields: [requests.accepted_bid_id],
@@ -485,6 +524,26 @@ export const pastWorksRelations = relations(pastWorks, ({ one }) => ({
   }),
 }));
 
+// testimonials relations 
+export const testimonialsRelations = relations(testimonials, ({ one }) => ({
+  user: one(users, {
+    fields: [testimonials.userId],
+    references: [users.id],
+  }),
+  request: one(requests, {
+    fields: [testimonials.requestId],
+    references: [requests.id],
+  }),
+  provider: one(providers, {
+    fields: [testimonials.providerId],
+    references: [providers.id],
+  }),
+  moderator: one(users, {
+    fields: [testimonials.moderatedBy],
+    references: [users.id],
+    relationName: 'moderatedTestimonials'
+  }),
+}));
 // Export types for TypeScript support
 export type TIUsers = typeof users.$inferInsert;
 export type TSUsers = typeof users.$inferSelect;
@@ -529,6 +588,9 @@ export type TSSupportTicket = typeof supportTickets.$inferSelect;
 export type TITicketResponse = typeof ticketResponses.$inferInsert;
 export type TSTicketResponse = typeof ticketResponses.$inferSelect;
 
+export type TITestimonials = typeof testimonials.$inferInsert;
+export type TSTestimonials = typeof testimonials.$inferSelect;
+
 // Extend the base request type to include relations
 export type TSRequestsWithRelations = TSRequests & {
   // Computed fields
@@ -547,4 +609,11 @@ export type TSRequestsWithRelations = TSRequests & {
       user?: TSUsers | null;
     } | null;
   })[];
+};
+
+export type TSTestimonialsWithRelations = TSTestimonials & {
+  user?: TSUsers | null;
+  request?: TSRequests | null;
+  provider?: TSProviders | null;
+  moderator?: TSUsers | null;
 };
