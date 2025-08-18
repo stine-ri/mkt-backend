@@ -57,26 +57,35 @@ const app = new Hono();
 // CORS configuration
 // Update your CORS middleware at the very top
 app.use('*', async (c, next) => {
-  // Handle OPTIONS requests first
+  const allowedOrigins = [
+    'http://localhost:5173',
+    'https://marketplace-frontend-delta-nine.vercel.app'
+  ];
+
+  const origin = c.req.header('origin') || '';
+  const isAllowed = allowedOrigins.includes(origin);
+
+  // Handle OPTIONS requests (preflight)
   if (c.req.method === 'OPTIONS') {
     return new Response(null, {
       status: 204,
       headers: {
-        'Access-Control-Allow-Origin': c.req.header('origin') || '*',
+        'Access-Control-Allow-Origin': isAllowed ? origin : allowedOrigins[0],
         'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS, PATCH',
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
         'Access-Control-Allow-Credentials': 'true',
         'Access-Control-Max-Age': '86400',
-      }
+      },
     });
   }
-  
+
   await next();
-  
+
   // Add CORS headers to all responses
-  c.header('Access-Control-Allow-Origin', c.req.header('origin') || '*');
+  c.header('Access-Control-Allow-Origin', isAllowed ? origin : allowedOrigins[0]);
   c.header('Access-Control-Allow-Credentials', 'true');
 });
+
 
 
 // PUBLIC ROUTES (before auth middleware) - EXACT PATHS ONLY
