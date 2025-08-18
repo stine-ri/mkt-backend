@@ -1,7 +1,10 @@
 import 'dotenv/config';
 import { serve } from '@hono/node-server';
+import { WebSocketServer, WebSocket } from 'ws';
+import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { verify } from 'hono/jwt';
 import { userRouter } from './users/users.router.js';
 import { authRouter } from './authentication/auth.router.js';
 import { serveStatic } from '@hono/node-server/serve-static';
@@ -26,10 +29,28 @@ import clientProducts from './routes/provider/clientProduct.js';
 import adminProduct from './routes/provider/adminProduct.js';
 import supportRoutes from './routes/provider/support.js';
 import notifications from './routes/provider/notifications.js'
+import { Readable } from 'stream';
+
 import { eq, and, or, gte, lte, inArray } from 'drizzle-orm';
 
 import * as schema from './drizzle/schema.js';
-import './websocket.js';
+
+// JWT payload interface
+interface JwtPayload {
+  id: string;
+  role: string;
+}
+
+// Extended WebSocket interface
+interface ExtendedWebSocket extends WebSocket {
+  isAlive: boolean;
+  user?: {
+    userId: number;
+    role: string;
+  };
+  ping(data?: any): void;
+}
+ 
  
 const app = new Hono();
 
@@ -46,11 +67,6 @@ app.use(
   })
 );
 
-// Serve static files from uploads directory
-app.use('/uploads/*', serveStatic({ 
-  root: './',
-  rewriteRequestPath: (path) => path 
-}));
 
 // PUBLIC ROUTES (before auth middleware) - EXACT PATHS ONLY
 app.get('/', (c) => {
@@ -206,6 +222,7 @@ app.route('/api/client/products', clientProducts);
 app.route('/api/admin/product', adminProduct )
 app.route('/api/support', supportRoutes);
 app.route('/api/notifications', notifications)
+
 // PROTECTED Admin endpoints (CREATE/UPDATE/DELETE operations)
 app.post('/api/services', async (c) => {
   console.log('Protected route: POST /api/services accessed');
@@ -340,9 +357,172 @@ app.patch('/api/notifications/:id/read', async (c) => {
   return c.json({ message: 'Notification marked as read' });
 });
 
-serve({
-  fetch: app.fetch,
-  port: Number(process.env.PORT) || 3000,
+// Create HTTP server and WebSocket server
+const port = Number(process.env.PORT) || 3000;
+
+// Fix for IncomingMessage vs Request type mismatch
+const server = createServer(async (req, res) => {
+  try {
+    // Convert Node's IncomingMessage to a Request object that Hono expects
+    const headers = new Headers();
+    for (const [key, value] of Object.entries(req.headers)) {
+      if (value) {
+        headers.set(key, Array.isArray(value) ? value.join(', ') : value);
+      }
+    }
+
+   // Convert Node's IncomingMessage (req) to a web ReadableStream
+function nodeStreamToWeb(req: IncomingMessage): ReadableStream<Uint8Array> {
+  const reader = Readable.toWeb(req) as ReadableStream<Uint8Array>;
+  return reader;
+}
+
+const request = new Request(`http://${req.headers.host}${req.url}`, {
+  method: req.method,
+  headers,
+  body: req.method !== 'GET' && req.method !== 'HEAD' ? nodeStreamToWeb(req) : undefined
 });
 
-console.log('✅ Server running on http://localhost:3000');
+    // Handle the request with Hono
+    const response = await app.fetch(request, {
+      // Pass any additional context here
+    });
+
+    // Send the response back to the client
+    res.writeHead(response.status, Object.fromEntries(response.headers.entries()));
+    if (response.body) {
+      for await (const chunk of response.body) {
+        res.write(chunk);
+      }
+    }
+    res.end();
+  } catch (err) {
+    console.error('Error handling request:', err);
+    res.writeHead(500);
+    res.end('Internal Server Error');
+  }
+});
+
+// Create WebSocket server on the same port
+const wss = new WebSocketServer({ server });
+
+// Fix for WebSocket type issues
+wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
+  // Cast to ExtendedWebSocket after connection is established
+  const extendedWs = ws as ExtendedWebSocket;
+  console.log('New WebSocket connection established');
+  extendedWs.isAlive = true;
+
+  // Ping/pong for connection health
+  extendedWs.on('pong', () => {
+    extendedWs.isAlive = true;
+  });
+
+  extendedWs.on('message', async (rawMessage: string | Buffer | ArrayBuffer | Buffer[]) => {
+    try {
+      const message = rawMessage.toString();
+      const data = JSON.parse(message);
+
+      // Handle authentication
+      if (data.type === 'auth') {
+        const secret = process.env.JWT_SECRET;
+        if (!secret) {
+          extendedWs.close(1011, 'Server configuration error');
+          return;
+        }
+
+        try {
+          const payload = await verify(data.token, secret) as unknown as JwtPayload;
+          if (payload?.id && payload.role) {
+            extendedWs.user = {
+              userId: parseInt(payload.id),
+              role: payload.role
+            };
+            console.log(`User ${payload.id} authenticated via WebSocket`);
+            
+            // Send unread notifications
+            const unread = await db
+              .select()
+              .from(schema.notifications)
+              .where(and(
+                eq(schema.notifications.userId, parseInt(payload.id)),
+                eq(schema.notifications.isRead, false)
+              ));
+
+            extendedWs.send(JSON.stringify({
+              type: 'initial_notifications',
+              data: unread
+            }));
+
+            // Send auth confirmation
+            extendedWs.send(JSON.stringify({
+              type: 'auth_success',
+              data: { userId: parseInt(payload.id), role: payload.role }
+            }));
+          }
+        } catch (authError) {
+          console.error('JWT verification failed:', authError);
+          extendedWs.close(1008, 'Invalid token');
+        }
+      }
+
+      // Handle marking notifications as read
+      if (data.type === 'mark_as_read' && extendedWs.user) {
+        const { notificationId } = data;
+        try {
+          await db
+            .update(schema.notifications)
+            .set({ isRead: true })
+            .where(and(
+              eq(schema.notifications.id, notificationId),
+              eq(schema.notifications.userId, extendedWs.user.userId)
+            ));
+          console.log(`Notification ${notificationId} marked as read`);
+        } catch (error) {
+          console.error('Error marking notification as read:', error);
+        }
+      }
+
+    } catch (err) {
+      console.error('WebSocket message error:', err);
+    }
+  });
+
+  extendedWs.on('close', () => {
+    console.log('WebSocket connection closed');
+  });
+
+  extendedWs.on('error', (error: Error) => {
+    console.error('WebSocket error:', error);
+  });
+});
+
+// Ping all clients every 30 seconds
+const interval = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    const extendedWs = ws as ExtendedWebSocket;
+    if (!extendedWs.isAlive) {
+      extendedWs.terminate();
+      return;
+    }
+    extendedWs.isAlive = false;
+    extendedWs.ping();
+  });
+}, 30000);
+
+wss.on('close', () => {
+  clearInterval(interval);
+});
+
+// Start the server
+server.listen(port, () => {
+  console.log(`✅ Server running with WebSocket support on port ${port}`);
+});
+
+server.on('error', (err: Error) => {
+  console.error('Server error:', err);
+});
+
+process.on('unhandledRejection', (err: Error) => {
+  console.error('Unhandled rejection:', err);
+});
