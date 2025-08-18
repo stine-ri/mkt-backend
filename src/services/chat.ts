@@ -4,7 +4,7 @@ import { db } from './../drizzle/db.js';
 import { chatRooms, messages, paymentAgreements, requests, users, providers , interests} from './../drizzle/schema.js';
 import { eq, and, desc, or, exists,inArray, InferModel } from 'drizzle-orm';
 import type { CustomContext } from '../types/context.js';
-import { notifyUser } from '../lib/notification.js';
+import { notifyUser } from '../websocket.js';
 
 const app = new Hono<CustomContext>();
 
