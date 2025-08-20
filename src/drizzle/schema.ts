@@ -223,7 +223,7 @@ export const products = pgTable('products', {
   name: text('name').notNull(),
   description: text('description').notNull(),
   price: numeric('price', { precision: 12, scale: 2 }).notNull(), // Using numeric for precise decimal storage
-  category: text('category').notNull(),
+  categoryId: integer('category_id').references(() => categories.id), 
   stock: integer('stock'),
   status: productStatusEnum('status').notNull().default('draft'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
@@ -312,6 +312,22 @@ export const testimonials = pgTable('testimonials', {
   statusPublicIdx: index('idx_testimonials_status_public').on(table.status, table.isPublic),
   createdAtIdx: index('idx_testimonials_created_at').on(table.createdAt),
 }));
+
+//  categories table
+export const categories = pgTable('categories', {
+  id: serial('id').primaryKey(),
+  name: varchar('name', { length: 255 }).notNull(),
+  description: text('description'),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// categories relations
+export const categoriesRelations = relations(categories, ({ many }) => ({
+  products: many(products),
+}));
+
 // Add relations
 export const supportTicketsRelations = relations(supportTickets, ({ many, one }) => ({
   user: one(users, {
@@ -337,6 +353,10 @@ export const productsRelations = relations(products, ({ many, one }) => ({
   provider: one(providers, {
     fields: [products.providerId],
     references: [providers.id],
+  }),
+   category: one(categories, { 
+    fields: [products.categoryId],
+    references: [categories.id],
   }),
   images: many(productImages),
   sales: many(productSales),

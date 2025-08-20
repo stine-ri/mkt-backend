@@ -6,7 +6,8 @@ import {
   products, 
   productImages, 
   productSales,
-  users
+  users,
+  categories
 } from '../../drizzle/schema.js';
 import { authMiddleware, serviceProviderRoleAuth } from '../../middleware/bearAuth.js';
 
@@ -53,13 +54,20 @@ product.get('/my',  async (c) => {
           columns: {
             url: true
           }
+        },
+        category: {  
+          columns: {
+            id: true,
+            name: true
+          }
         }
       }
     });
 
     const formatted = result.map(p => ({
       ...p,
-      images: p.images.map(i => i.url)
+      images: p.images.map(i => i.url),
+       category: p.category 
     }));
 
     return c.json(formatted);
@@ -70,6 +78,7 @@ product.get('/my',  async (c) => {
 });
 
 // Create new product
+
 product.post('/', async (c) => {
   const providerId = c.get('user').providerId;
   if (typeof providerId !== 'number') {
@@ -82,7 +91,7 @@ product.post('/', async (c) => {
   const name = formData.get('name')?.toString().trim();
   const description = formData.get('description')?.toString().trim();
   const price = formData.get('price')?.toString();
-  const category = formData.get('category')?.toString().trim();
+  const category = formData.get('category')?.toString().trim(); // This will be converted to categoryId
   const stock = formData.get('stock')?.toString().trim();
   const imageFiles = formData.getAll('images') as File[];
 
@@ -111,14 +120,29 @@ product.post('/', async (c) => {
   let productId: number | null = null;
   let uploadedImageUrls: string[] = [];
 
-   try {
-    // Step 1: Create the product record (same as before)
+  try {
+    // Convert category to categoryId if needed
+    let categoryId: number | undefined;
+    
+    // If category is a number (categoryId), use it directly
+    if (!isNaN(parseInt(category))) {
+      categoryId = parseInt(category);
+    } else {
+      // If category is a string, find the corresponding categoryId
+      // You might want to add a query to find the category by name
+      const foundCategory = await db.query.categories.findFirst({
+        where: eq(categories.name, category)
+      });
+      categoryId = foundCategory?.id;
+    }
+
+    // Step 1: Create the product record
     const [product] = await db.insert(products).values({
       providerId,
       name,
       description,
       price: priceNum.toString(),
-      category,
+      categoryId, // Use categoryId instead of category
       stock: stock ? parseInt(stock) : null,
       status: 'draft',
     }).returning();
