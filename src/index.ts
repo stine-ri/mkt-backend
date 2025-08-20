@@ -31,6 +31,7 @@ import supportRoutes from './routes/provider/support.js';
 import notifications from './routes/provider/notifications.js';
 import testimonialsRouter from './routes/provider/testimonials.js';
 import adminCategories from './routes/provider/categories.js';
+import publicCategories from './routes/provider/categories.js';
 import { Readable } from 'stream';
 
 import { eq, and, or, gte, lte, inArray } from 'drizzle-orm';
@@ -235,8 +236,10 @@ app.route('/api/product', productRoutes);
 // Public routes
 app.route('/api/products', publicProductRoutes);
 
+
 app.route('/api/admin/bids', adminBids)
 app.route('/api/admin/requests', adminRequests);
+app.route('/api/public/categories', publicCategories);
 
 // Mount public provider routes
 app.route('/api/provider/public', publicProviderRoutes);
