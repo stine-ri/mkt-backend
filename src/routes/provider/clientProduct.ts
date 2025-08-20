@@ -7,7 +7,8 @@ import {
   productSales,
   colleges,
   users,
-  providers
+  providers,
+  
 } from '../../drizzle/schema.js';
 import { authMiddleware } from '../../middleware/bearAuth.js';
 import { ValidationError } from '../../utils/error.js';
@@ -40,14 +41,19 @@ clientProducts.get('/', async (c) => {
       whereConditions.push(
         or(
           ilike(products.name, `%${search}%`),
-          ilike(products.description, `%${search}%`),
-          ilike(products.category, `%${search}%`)
+          ilike(products.description, `%${search}%`)
+          // Note: removed category search since it's now categoryId (integer)
+          // If you want to search by category name, you'll need to join with categories table
         )
       );
     }
 
+    // Fixed: Use categoryId instead of category
     if (category) {
-      whereConditions.push(eq(products.category, category));
+      const categoryIdNum = parseInt(category);
+      if (!isNaN(categoryIdNum)) {
+        whereConditions.push(eq(products.categoryId, categoryIdNum));
+      }
     }
 
     if (minPrice) {
@@ -74,6 +80,13 @@ clientProducts.get('/', async (c) => {
         images: {
           columns: {
             url: true
+          }
+        },
+        // Include category relation to get category name
+        category: {
+          columns: {
+            id: true,
+            name: true
           }
         },
         provider: {
@@ -129,7 +142,8 @@ clientProducts.get('/', async (c) => {
       name: product.name,
       description: product.description,
       price: product.price,
-      category: product.category,
+      categoryId: product.categoryId, // Use categoryId consistently
+      categoryName: product.category?.name || null, // Add category name from relation
       stock: product.stock,
       status: product.status,
       createdAt: product.createdAt,
@@ -218,6 +232,12 @@ clientProducts.get('/:id', async (c) => {
             url: true
           }
         },
+        category: {
+          columns: {
+            id: true,
+            name: true
+          }
+        },
         provider: {
           columns: {
             id: true,
@@ -247,6 +267,7 @@ clientProducts.get('/:id', async (c) => {
 
     return c.json({
       ...product,
+      categoryName: product.category?.name || null,
       images: product.images.map(img => img.url)
     });
   } catch (error) {

@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { authMiddleware, adminRoleAuth } from '../../middleware/bearAuth.js';
 import { db } from '../../drizzle/db.js';
-import { products, providers, users, productImages, productSales } from '../../drizzle/schema.js';
+import { products, providers, users, productImages, productSales, categories } from '../../drizzle/schema.js';
 import { and, eq, sql, gte, count, avg, inArray, desc } from 'drizzle-orm';
 import type {
   TIProducts,
@@ -25,18 +25,17 @@ const router = new Hono();
 router.use('*', authMiddleware);
 router.use('*', adminRoleAuth);
 
-// Product schema for validation
+// Product schema for validation - Updated to use categoryId
 const productSchema = z.object({
   name: z.string().min(1),
   description: z.string().min(1),
   price: z.number().positive().transform(val => val.toString()), // Convert to string for numeric field
-  category: z.string().min(1),
+  categoryId: z.number().int().positive().optional(), // Changed from category to categoryId
   stock: z.number().int().min(0).optional(),
   status: z.enum(['draft', 'published', 'archived']).optional().default('draft'),
   providerId: z.number().int().positive(),
 });
 
-// GET /api/admin/products - Get all products with provider and user info
 // GET /api/admin/products - Get all products with provider and user info
 router.get('/', async (c) => {
   try {
@@ -51,14 +50,15 @@ router.get('/', async (c) => {
       .select({ count: count() })
       .from(products);
 
-    // Then get the paginated results
+    // Then get the paginated results with category name
     const productsWithDetails = await db
       .select({
         id: products.id,
         name: products.name,
         description: products.description,
         price: products.price,
-        category: products.category,
+        categoryId: products.categoryId,
+        categoryName: categories.name, // Get actual category name
         stock: products.stock,
         status: products.status,
         createdAt: products.createdAt,
@@ -98,12 +98,19 @@ router.get('/', async (c) => {
       .from(products)
       .leftJoin(providers, eq(products.providerId, providers.id))
       .leftJoin(users, eq(providers.userId, users.id))
+      .leftJoin(categories, eq(products.categoryId, categories.id))
       .orderBy(desc(products.createdAt))
       .limit(limitNum)
       .offset(offset);
 
+    // Transform the response to include category as string
+    const transformedData = productsWithDetails.map(item => ({
+      ...item,
+      category: item.categoryName || 'Uncategorized'
+    }));
+
     return c.json({
-      data: productsWithDetails,
+      data: transformedData,
       pagination: {
         total: totalCount[0].count,
         page: pageNum,
@@ -134,7 +141,8 @@ router.get('/:id', async (c) => {
         name: products.name,
         description: products.description,
         price: products.price,
-        category: products.category,
+        categoryId: products.categoryId,
+        categoryName: categories.name,
         stock: products.stock,
         status: products.status,
         createdAt: products.createdAt,
@@ -166,7 +174,7 @@ router.get('/:id', async (c) => {
           )) 
           FROM ${productImages} pi 
           WHERE pi.product_id = ${products.id}
-        , '[]'::json)`,
+        ), '[]'::json)`,
         salesCount: sql<number>`(
           SELECT COUNT(*) 
           FROM ${productSales} ps 
@@ -176,13 +184,20 @@ router.get('/:id', async (c) => {
       .from(products)
       .leftJoin(providers, eq(products.providerId, providers.id))
       .leftJoin(users, eq(providers.userId, users.id))
+      .leftJoin(categories, eq(products.categoryId, categories.id))
       .where(eq(products.id, id));
 
     if (!productWithDetails.length) {
       throw new HTTPException(404, { message: 'Product not found' });
     }
 
-    return c.json(productWithDetails[0]);
+    // Transform the response
+    const result = {
+      ...productWithDetails[0],
+      category: productWithDetails[0].categoryName || 'Uncategorized'
+    };
+
+    return c.json(result);
   } catch (error) {
     console.error('Error fetching product:', error);
     if (error instanceof HTTPException) throw error;
@@ -201,6 +216,7 @@ router.post('/', async (c) => {
       ...rawData,
       price: parseFloat(rawData.price),
       providerId: parseInt(rawData.providerId),
+      categoryId: rawData.categoryId ? parseInt(rawData.categoryId) : undefined,
       stock: rawData.stock ? parseInt(rawData.stock) : undefined,
     });
 
@@ -222,6 +238,19 @@ router.post('/', async (c) => {
       throw new HTTPException(400, { message: 'Provider not found' });
     }
 
+    // Validate category exists if provided
+    if (insertData.categoryId) {
+      const category = await db
+        .select()
+        .from(categories)
+        .where(eq(categories.id, insertData.categoryId))
+        .limit(1);
+
+      if (!category.length) {
+        throw new HTTPException(400, { message: 'Category not found' });
+      }
+    }
+
     // Create product
     const [newProduct] = await db
       .insert(products)
@@ -235,7 +264,8 @@ router.post('/', async (c) => {
         name: products.name,
         description: products.description,
         price: products.price,
-        category: products.category,
+        categoryId: products.categoryId,
+        categoryName: categories.name,
         stock: products.stock,
         status: products.status,
         createdAt: products.createdAt,
@@ -257,9 +287,15 @@ router.post('/', async (c) => {
       .from(products)
       .leftJoin(providers, eq(products.providerId, providers.id))
       .leftJoin(users, eq(providers.userId, users.id))
+      .leftJoin(categories, eq(products.categoryId, categories.id))
       .where(eq(products.id, newProduct.id));
 
-    return c.json(createdProduct[0], 201);
+    const result = {
+      ...createdProduct[0],
+      category: createdProduct[0].categoryName || 'Uncategorized'
+    };
+
+    return c.json(result, 201);
   } catch (error) {
     console.error('Error creating product:', error);
     if (error instanceof z.ZodError) {
@@ -291,6 +327,7 @@ router.put('/:id', async (c) => {
       ...rawData,
       price: rawData.price !== undefined ? parseFloat(rawData.price) : undefined,
       providerId: rawData.providerId !== undefined ? parseInt(rawData.providerId) : undefined,
+      categoryId: rawData.categoryId !== undefined ? parseInt(rawData.categoryId) : undefined,
       stock: rawData.stock !== undefined ? parseInt(rawData.stock) : undefined,
     });
 
@@ -323,6 +360,19 @@ router.put('/:id', async (c) => {
       }
     }
 
+    // Validate category if categoryId is being updated
+    if (updateData.categoryId && updateData.categoryId !== product[0].categoryId) {
+      const category = await db
+        .select()
+        .from(categories)
+        .where(eq(categories.id, updateData.categoryId))
+        .limit(1);
+
+      if (!category.length) {
+        throw new HTTPException(400, { message: 'Category not found' });
+      }
+    }
+
     // Update product
     const [updatedProduct] = await db
       .update(products)
@@ -337,7 +387,8 @@ router.put('/:id', async (c) => {
         name: products.name,
         description: products.description,
         price: products.price,
-        category: products.category,
+        categoryId: products.categoryId,
+        categoryName: categories.name,
         stock: products.stock,
         status: products.status,
         createdAt: products.createdAt,
@@ -359,9 +410,15 @@ router.put('/:id', async (c) => {
       .from(products)
       .leftJoin(providers, eq(products.providerId, providers.id))
       .leftJoin(users, eq(providers.userId, users.id))
+      .leftJoin(categories, eq(products.categoryId, categories.id))
       .where(eq(products.id, id));
 
-    return c.json(updatedProductWithDetails[0]);
+    const result = {
+      ...updatedProductWithDetails[0],
+      category: updatedProductWithDetails[0].categoryName || 'Uncategorized'
+    };
+
+    return c.json(result);
   } catch (error) {
     console.error('Error updating product:', error);
     if (error instanceof z.ZodError) {
@@ -417,7 +474,6 @@ router.delete('/:id', async (c) => {
 });
 
 // POST /api/admin/products/bulk-delete - Bulk delete products
-
 router.post('/bulk-delete', async (c) => {
   try {
     const { ids } = await c.req.json();
@@ -446,13 +502,13 @@ router.post('/bulk-delete', async (c) => {
     }
 
     // Delete products
-    const deletedCount = await db
+    await db
       .delete(products)
       .where(inArray(products.id, validIds));
 
     return c.json({
-      message: `Successfully deleted ${deletedCount} products`,
-      deletedCount,
+      message: `Successfully deleted ${productsToDelete.length} products`,
+      deletedCount: productsToDelete.length,
       deletedProducts: productsToDelete.map((p: Pick<TSProducts, 'id' | 'name'>) => ({ 
         id: p.id, 
         name: p.name 
@@ -468,13 +524,12 @@ router.post('/bulk-delete', async (c) => {
 });
 
 // GET /api/admin/products/stats/overview - Get product statistics
-
 router.get('/stats/overview', async (c) => {
   try {
-    // Define types for the statistics
+    // Define correct types for the statistics
     type StatusCount = { status: string; count: number };
-    type CategoryCount = { category: string; count: number };
-    type CategoryAvgPrice = { category: string; avgPrice: string | null };
+    type CategoryCount = { categoryId: number | null; categoryName: string | null; count: number };
+    type CategoryAvgPrice = { categoryId: number | null; categoryName: string | null; avgPrice: string | null };
 
     // Total products
     const totalProducts = await db.select({ count: count() }).from(products);
@@ -488,25 +543,29 @@ router.get('/stats/overview', async (c) => {
       .from(products)
       .groupBy(products.status);
 
-    // Products by category
+    // Products by category with category names
     const productsByCategory = await db
       .select({
-        category: products.category,
+        categoryId: products.categoryId,
+        categoryName: categories.name,
         count: count(),
       })
       .from(products)
-      .groupBy(products.category)
+      .leftJoin(categories, eq(products.categoryId, categories.id))
+      .groupBy(products.categoryId, categories.name)
       .orderBy(count());
 
-    // Average price by category
+    // Average price by category with category names
     const avgPriceByCategory = await db
       .select({
-        category: products.category,
+        categoryId: products.categoryId,
+        categoryName: categories.name,
         avgPrice: avg(products.price),
       })
       .from(products)
-      .groupBy(products.category)
-      .orderBy(products.category);
+      .leftJoin(categories, eq(products.categoryId, categories.id))
+      .groupBy(products.categoryId, categories.name)
+      .orderBy(products.categoryId);
 
     // Recent products (last 30 days)
     const thirtyDaysAgo = new Date();
@@ -528,11 +587,13 @@ router.get('/stats/overview', async (c) => {
       })),
       recentProducts: recentProducts[0].count,
       productsByCategory: productsByCategory.map((item: CategoryCount) => ({
-        category: item.category,
+        categoryId: item.categoryId,
+        category: item.categoryName || 'Uncategorized',
         count: item.count,
       })),
       avgPriceByCategory: avgPriceByCategory.map((item: CategoryAvgPrice) => ({
-        category: item.category,
+        categoryId: item.categoryId,
+        category: item.categoryName || 'Uncategorized',
         avgPrice: item.avgPrice ? parseFloat(item.avgPrice).toFixed(2) : '0.00',
       })),
       totalSales: totalSales[0].count,

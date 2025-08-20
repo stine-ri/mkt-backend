@@ -1,38 +1,46 @@
 import { Hono } from 'hono';
 import { eq, desc, ilike, or, and } from 'drizzle-orm';
 import { db } from '../../drizzle/db.js';
-import { products, productImages, providers} from '../../drizzle/schema.js';
+import { products, productImages, providers, categories } from '../../drizzle/schema.js';
 
 const publicProduct = new Hono();
 
 // Public endpoint to get all published products
 publicProduct.get('/', async (c) => {
   try {
-    // Use the same pattern as your search endpoint to include images
-    const result = await db.select()
-      .from(products)
-      .leftJoin(productImages, eq(products.id, productImages.productId))
-      .where(eq(products.status, 'published'))
-      .orderBy(desc(products.createdAt));
-
-    // Group images by product (same logic as search endpoint)
-    const productsMap = new Map();
-    result.forEach(row => {
-      const product = row.products;
-      if (!productsMap.has(product.id)) {
-        productsMap.set(product.id, {
-          ...product,
-          images: []
-        });
-      }
-      if (row.product_images?.url) {
-        productsMap.get(product.id).images.push(row.product_images.url);
+    // Use relation-based query to include category information
+    const result = await db.query.products.findMany({
+      where: eq(products.status, 'published'),
+      orderBy: [desc(products.createdAt)],
+      with: {
+        images: {
+          columns: {
+            url: true
+          }
+        },
+        category: {
+          columns: {
+            name: true,
+            description: true
+          }
+        },
+        provider: {
+          columns: {
+            id: true,
+            firstName: true,
+            lastName: true
+          }
+        }
       }
     });
 
-    const formatted = Array.from(productsMap.values()).map((product) => ({
+    const formatted = result.map((product) => ({
       ...product,
-      provider: 'Unknown Provider' // Keep this default since provider relation doesn't exist
+      category: product.category?.name || 'Uncategorized',
+      images: product.images.map(img => img.url),
+      provider: product.provider 
+        ? `${product.provider.firstName} ${product.provider.lastName}`
+        : 'Unknown Provider'
     }));
 
     return c.json(formatted);
@@ -48,52 +56,142 @@ publicProduct.get('/search', async (c) => {
     const search = c.req.query('q');
     const category = c.req.query('category');
     
-    // Build the base query
-    const baseQuery = db.select()
-      .from(products)
-      .leftJoin(productImages, eq(products.id, productImages.productId))
-      .orderBy(desc(products.createdAt));
-
     // Build conditions array
     const conditions = [eq(products.status, 'published')];
 
     if (search) {
-      const searchCondition = or(
-        ilike(products.name, `%${search}%`),
-        ilike(products.description, `%${search}%`),
-        ilike(products.category, `%${search}%`)
-      );
+      // For search, we'll need to use a raw query or join with categories
+      const searchResults = await db.select({
+        id: products.id,
+        name: products.name,
+        description: products.description,
+        price: products.price,
+        categoryId: products.categoryId,
+        stock: products.stock,
+        status: products.status,
+        providerId: products.providerId,
+        createdAt: products.createdAt,
+        updatedAt: products.updatedAt,
+        categoryName: categories.name
+      })
+      .from(products)
+      .leftJoin(categories, eq(products.categoryId, categories.id))
+      .where(and(
+        eq(products.status, 'published'),
+        or(
+          ilike(products.name, `%${search}%`),
+          ilike(products.description, `%${search}%`),
+          ilike(categories.name, `%${search}%`)
+        )
+      ))
+      .orderBy(desc(products.createdAt));
+
+      // Get product IDs for image fetching
+      const productIds = searchResults.map(p => p.id);
       
-      if (searchCondition) {
-        conditions.push(searchCondition);
-      }
+      // Fetch images for these products
+      const images = await db.select()
+        .from(productImages)
+        .where(eq(productImages.productId, productIds[0] || 0)); // Fallback to prevent empty array issues
+
+      // Group images by product
+      const imageMap = new Map();
+      images.forEach(img => {
+        if (!imageMap.has(img.productId)) {
+          imageMap.set(img.productId, []);
+        }
+        imageMap.get(img.productId).push(img.url);
+      });
+
+      const formatted = searchResults.map(product => ({
+        ...product,
+        category: product.categoryName || 'Uncategorized',
+        images: imageMap.get(product.id) || [],
+        provider: 'Unknown Provider'
+      }));
+
+      return c.json(formatted);
     }
 
     if (category) {
-      conditions.push(ilike(products.category, `%${category}%`));
+      // Category-based search
+      const result = await db.query.products.findMany({
+        where: and(
+          eq(products.status, 'published')
+        ),
+        orderBy: [desc(products.createdAt)],
+        with: {
+          images: {
+            columns: {
+              url: true
+            }
+          },
+          category: {
+            columns: {
+              name: true,
+              description: true
+            }
+          },
+          provider: {
+            columns: {
+              id: true,
+              firstName: true,
+              lastName: true
+            }
+          }
+        }
+      });
+
+      // Filter by category name
+      const filtered = result.filter(product => 
+        product.category?.name?.toLowerCase().includes(category.toLowerCase())
+      );
+
+      const formatted = filtered.map((product) => ({
+        ...product,
+        category: product.category?.name || 'Uncategorized',
+        images: product.images.map(img => img.url),
+        provider: product.provider 
+          ? `${product.provider.firstName} ${product.provider.lastName}`
+          : 'Unknown Provider'
+      }));
+
+      return c.json(formatted);
     }
 
-    // Execute query with all conditions
-    const result = await baseQuery.where(and(...conditions));
-
-    // Group images by product
-    const productsMap = new Map();
-    result.forEach(row => {
-      const product = row.products;
-      if (!productsMap.has(product.id)) {
-        productsMap.set(product.id, {
-          ...product,
-          images: []
-        });
-      }
-      if (row.product_images?.url) {
-        productsMap.get(product.id).images.push(row.product_images.url);
+    // No search parameters, return all
+    const result = await db.query.products.findMany({
+      where: eq(products.status, 'published'),
+      orderBy: [desc(products.createdAt)],
+      with: {
+        images: {
+          columns: {
+            url: true
+          }
+        },
+        category: {
+          columns: {
+            name: true,
+            description: true
+          }
+        },
+        provider: {
+          columns: {
+            id: true,
+            firstName: true,
+            lastName: true
+          }
+        }
       }
     });
 
-    const formatted = Array.from(productsMap.values()).map((product) => ({
+    const formatted = result.map((product) => ({
       ...product,
-      provider: 'Unknown Provider'
+      category: product.category?.name || 'Uncategorized',
+      images: product.images.map(img => img.url),
+      provider: product.provider 
+        ? `${product.provider.firstName} ${product.provider.lastName}`
+        : 'Unknown Provider'
     }));
 
     return c.json(formatted);
