@@ -3,16 +3,30 @@ import { Hono } from 'hono';
 import { eq, desc } from 'drizzle-orm';
 import { db } from '../../drizzle/db.js';
 import { categories, products } from '../../drizzle/schema.js';
-import { adminRoleAuth } from '../../middleware/bearAuth.js';
+import { adminRoleAuth, serviceProviderRoleAuth, clientRoleAuth } from '../../middleware/bearAuth.js';
 
-const adminCategories = new Hono()
-  .use('*', adminRoleAuth);
+const adminCategories = new Hono();
 
-// Get all categories
+// Apply different authentication based on HTTP method
+adminCategories
+  .get('*', async (c, next) => {
+    // Allow all authenticated users to read categories
+    const token = c.req.header("Authorization")?.split(" ")[1];
+    if (!token) {
+      return c.json({ error: "Token not provided" }, 401);
+    }
+    await next();
+  })
+  .post('*', adminRoleAuth)
+  .patch('*', adminRoleAuth)
+  .delete('*', adminRoleAuth);
+
+// Get all categories - allow all authenticated users
 adminCategories.get('/', async (c) => {
   try {
     const result = await db.query.categories.findMany({
       orderBy: [desc(categories.createdAt)],
+      where: eq(categories.isActive, true) // Only return active categories
     });
     return c.json(result);
   } catch (error) {
@@ -21,7 +35,7 @@ adminCategories.get('/', async (c) => {
   }
 });
 
-// Create category
+// Create category - admin only
 adminCategories.post('/', async (c) => {
   const { name, description } = await c.req.json();
 
@@ -42,7 +56,7 @@ adminCategories.post('/', async (c) => {
   }
 });
 
-// Update category
+// Update category - admin only
 adminCategories.patch('/:id', async (c) => {
   const categoryId = parseInt(c.req.param('id'));
   const { name, description, isActive } = await c.req.json();
@@ -69,7 +83,7 @@ adminCategories.patch('/:id', async (c) => {
   }
 });
 
-// Delete category (soft delete by setting isActive to false)
+// Delete category - admin only
 adminCategories.delete('/:id', async (c) => {
   const categoryId = parseInt(c.req.param('id'));
 
