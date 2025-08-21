@@ -238,15 +238,16 @@ app.get('/', async (c: Context<CustomContext>) => {
             r.id,
             r.user_id,
             r.service_id,
-            r.title,
+            r.product_name as title,
             r.description,
-            r.budget,
+            r.desired_price as budget,  
             r.status,
             r.created_at,
             r.updated_at,
             r.deadline,
             r.college_filter_id,
             r.location as raw_location,
+            r.is_service,  
             u.email AS user_email, 
             u.role AS user_role,
             s.name AS service_name,
@@ -262,7 +263,7 @@ app.get('/', async (c: Context<CustomContext>) => {
               WHERE i.request_id = r.id
             ) AS interests
           FROM requests r
-          LEFT JOIN users u ON u.user_id = r.user_id
+          LEFT JOIN users u ON u.id = r.user_id  
           LEFT JOIN services s ON s.id = r.service_id
           LEFT JOIN colleges c ON c.id = r.college_filter_id
           WHERE r.status = 'open'
@@ -279,6 +280,7 @@ app.get('/', async (c: Context<CustomContext>) => {
           sampleRow: results.rows?.[0] ? {
             id: results.rows[0].id,
             title: results.rows[0].title,
+            budget: results.rows[0].budget,   
             created_at: results.rows[0].created_at,
             raw_location: results.rows[0].raw_location
           } : null
@@ -354,9 +356,9 @@ app.get('/', async (c: Context<CustomContext>) => {
           r.id,
           r.user_id,
           r.service_id,
-          r.title,
+          r.product_name as title,  
           r.description,
-          r.budget,
+          r.desired_price as budget,
           r.status,
           r.created_at,
           r.updated_at,
@@ -378,7 +380,7 @@ app.get('/', async (c: Context<CustomContext>) => {
             WHERE i.request_id = r.id
           ) AS interests
         FROM requests r
-        LEFT JOIN users u ON u.user_id = r.user_id
+        LEFT JOIN users u ON u.id = r.user_id  
         LEFT JOIN services s ON s.id = r.service_id
         LEFT JOIN colleges c ON c.id = r.college_filter_id
         WHERE r.status = 'open'
