@@ -180,19 +180,36 @@ app.get('/', async (c: Context<CustomContext>) => {
 
     // Helper function to format the response data
     function formatResponseData(rows: any[]) {
+      if (!rows || !Array.isArray(rows)) {
+        console.warn('⚠️ Invalid rows data provided to formatResponseData:', rows);
+        return [];
+      }
+
       return rows.map(row => {
-        const location = processLocation(row.raw_location);
-        
-        // Remove raw_location and ensure created_at is included
-        const { raw_location, ...cleanRow } = row;
-        
-        return {
-          ...cleanRow,
-          location,
-          created_at: row.created_at, // Explicitly ensure created_at is included
-          // Format created_at as ISO string if it's not already
-          createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
-        };
+        try {
+          const location = processLocation(row.raw_location);
+          
+          // Remove raw_location and ensure created_at is included
+          const { raw_location, ...cleanRow } = row;
+          
+          return {
+            ...cleanRow,
+            location,
+            created_at: row.created_at, // Explicitly ensure created_at is included
+            // Format created_at as ISO string if it's not already
+            createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+          };
+        } catch (formatError) {
+          console.error('❌ Error formatting row:', { row, error: formatError });
+          // Return the row with minimal processing if formatting fails
+          const { raw_location, ...cleanRow } = row;
+          return {
+            ...cleanRow,
+            location: null,
+            created_at: row.created_at,
+            createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+          };
+        }
       });
     }
 
@@ -235,10 +252,11 @@ app.get('/', async (c: Context<CustomContext>) => {
             s.name AS service_name,
             c.name AS college_name,
             (
-              SELECT json_agg(b.*) FROM bids b WHERE b.request_id = r.id
+              SELECT COALESCE(json_agg(b.*) FILTER (WHERE b.id IS NOT NULL), '[]'::json) 
+              FROM bids b WHERE b.request_id = r.id
             ) AS bids,
             (
-              SELECT json_agg(i.*) 
+              SELECT COALESCE(json_agg(i.*) FILTER (WHERE i.id IS NOT NULL), '[]'::json) 
               FROM interests i
               LEFT JOIN providers p ON p.id = i.provider_id
               WHERE i.request_id = r.id
@@ -257,11 +275,28 @@ app.get('/', async (c: Context<CustomContext>) => {
         console.log('✅ Non-location query successful:', {
           rowCount: results.rows?.length || 0,
           executionTime: Date.now() - startTime,
-          showingAllServices: filterByServices !== 'true'
+          showingAllServices: filterByServices !== 'true',
+          sampleRow: results.rows?.[0] ? {
+            id: results.rows[0].id,
+            title: results.rows[0].title,
+            created_at: results.rows[0].created_at,
+            raw_location: results.rows[0].raw_location
+          } : null
         });
 
         // Process the results and format location and created_at
-        const formattedResults = formatResponseData(results.rows);
+        const formattedResults = formatResponseData(results.rows || []);
+
+        console.log('🔄 Formatted results sample:', {
+          count: formattedResults.length,
+          sampleFormatted: formattedResults[0] ? {
+            id: formattedResults[0].id,
+            title: formattedResults[0].title,
+            created_at: formattedResults[0].created_at,
+            createdAt: formattedResults[0].createdAt,
+            location: formattedResults[0].location
+          } : null
+        });
 
         return c.json(formattedResults);
 
@@ -333,10 +368,11 @@ app.get('/', async (c: Context<CustomContext>) => {
           s.name AS service_name,
           c.name AS college_name,
           (
-            SELECT json_agg(b.*) FROM bids b WHERE b.request_id = r.id
+            SELECT COALESCE(json_agg(b.*) FILTER (WHERE b.id IS NOT NULL), '[]'::json) 
+            FROM bids b WHERE b.request_id = r.id
           ) AS bids,
           (
-            SELECT json_agg(i.*) 
+            SELECT COALESCE(json_agg(i.*) FILTER (WHERE i.id IS NOT NULL), '[]'::json) 
             FROM interests i
             LEFT JOIN providers p ON p.id = i.provider_id
             WHERE i.request_id = r.id
@@ -352,29 +388,55 @@ app.get('/', async (c: Context<CustomContext>) => {
         LIMIT 200
       `);
 
+      console.log('🔍 Location query executed:', {
+        totalFound: results.rows?.length || 0,
+        sampleRow: results.rows?.[0] ? {
+          id: results.rows[0].id,
+          created_at: results.rows[0].created_at,
+          raw_location: results.rows[0].raw_location
+        } : null
+      });
+
       // Process results and filter by distance in JavaScript
-      const processedResults = formatResponseData(results.rows)
+      const processedResults = formatResponseData(results.rows || [])
         .filter(row => {
-          // Only include rows with valid coordinates for distance filtering
-          if (!row.location || !row.location.lat || !row.location.lng) {
-            return false; // Skip requests without valid coordinates
+          try {
+            // Only include rows with valid coordinates for distance filtering
+            if (!row.location || !row.location.lat || !row.location.lng) {
+              console.log('🚫 Skipping row without valid location:', { id: row.id, location: row.location });
+              return false; // Skip requests without valid coordinates
+            }
+
+            // Calculate distance using Haversine formula
+            const R = 6371; // Earth's radius in kilometers
+            const dLat = (row.location.lat - numLat) * Math.PI / 180;
+            const dLng = (row.location.lng - numLng) * Math.PI / 180;
+            const a = 
+              Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(numLat * Math.PI / 180) * Math.cos(row.location.lat * Math.PI / 180) * 
+              Math.sin(dLng/2) * Math.sin(dLng/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            const distance = R * c;
+
+            // Add distance to the result for frontend use
+            row.distance = parseFloat(distance.toFixed(2));
+
+            const withinRange = distance <= numRange;
+            console.log('📏 Distance calculation:', { 
+              id: row.id, 
+              distance: row.distance, 
+              withinRange,
+              maxRange: numRange 
+            });
+
+            return withinRange;
+          } catch (distanceError) {
+            console.error('❌ Error calculating distance for row:', { 
+              rowId: row.id, 
+              error: distanceError 
+            });
+            return false;
           }
-
-          // Calculate distance using Haversine formula
-          const R = 6371; // Earth's radius in kilometers
-          const dLat = (row.location.lat - numLat) * Math.PI / 180;
-          const dLng = (row.location.lng - numLng) * Math.PI / 180;
-          const a = 
-            Math.sin(dLat/2) * Math.sin(dLat/2) +
-            Math.cos(numLat * Math.PI / 180) * Math.cos(row.location.lat * Math.PI / 180) * 
-            Math.sin(dLng/2) * Math.sin(dLng/2);
-          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-          const distance = R * c;
-
-          // Add distance to the result for frontend use
-          row.distance = parseFloat(distance.toFixed(2));
-
-          return distance <= numRange;
         })
         .slice(0, 100); // Limit to 100 results
 
