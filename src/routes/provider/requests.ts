@@ -195,8 +195,7 @@ app.get('/', async (c: Context<CustomContext>) => {
           return {
             ...cleanRow,
             location,
-            created_at: row.created_at, // Explicitly ensure created_at is included
-            // Format created_at as ISO string if it's not already
+            created_at: row.created_at,
             createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
           };
         } catch (formatError) {
@@ -240,16 +239,18 @@ app.get('/', async (c: Context<CustomContext>) => {
             r.service_id,
             r.product_name as title,
             r.description,
-            r.desired_price as budget,  
+            r.desired_price as budget,
             r.status,
             r.created_at,
-            r.updated_at,
-            r.deadline,
             r.college_filter_id,
             r.location as raw_location,
-            r.is_service,  
-            u.email AS user_email, 
+            r.is_service,
+            r.allow_interests,
+            r.allow_bids,
+            r.accepted_bid_id,
+            u.email AS user_email,
             u.role AS user_role,
+            u.full_name AS user_full_name,
             s.name AS service_name,
             c.name AS college_name,
             (
@@ -263,7 +264,7 @@ app.get('/', async (c: Context<CustomContext>) => {
               WHERE i.request_id = r.id
             ) AS interests
           FROM requests r
-          LEFT JOIN users u ON u.id = r.user_id  
+          LEFT JOIN users u ON u.user_id = r.user_id
           LEFT JOIN services s ON s.id = r.service_id
           LEFT JOIN colleges c ON c.id = r.college_filter_id
           WHERE r.status = 'open'
@@ -350,23 +351,26 @@ app.get('/', async (c: Context<CustomContext>) => {
         ? sql`AND (r.college_filter_id IS NULL OR r.college_filter_id = ${provider.collegeId})`
         : sql``;
 
-      // Updated location-based query with explicit field selection
+      // Updated location-based query with fixed column names
       const results = await db.execute(sql`
         SELECT 
           r.id,
           r.user_id,
           r.service_id,
-          r.product_name as title,  
+          r.product_name as title,
           r.description,
           r.desired_price as budget,
           r.status,
           r.created_at,
-          r.updated_at,
-          r.deadline,
           r.college_filter_id,
           r.location as raw_location,
-          u.email AS user_email, 
+          r.is_service,
+          r.allow_interests,
+          r.allow_bids,
+          r.accepted_bid_id,
+          u.email AS user_email,
           u.role AS user_role,
+          u.full_name AS user_full_name,
           s.name AS service_name,
           c.name AS college_name,
           (
@@ -380,7 +384,6 @@ app.get('/', async (c: Context<CustomContext>) => {
             WHERE i.request_id = r.id
           ) AS interests
         FROM requests r
-        LEFT JOIN users u ON u.id = r.user_id  
         LEFT JOIN services s ON s.id = r.service_id
         LEFT JOIN colleges c ON c.id = r.college_filter_id
         WHERE r.status = 'open'
