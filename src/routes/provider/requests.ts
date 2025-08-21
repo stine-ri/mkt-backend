@@ -145,72 +145,143 @@ app.get('/', async (c: Context<CustomContext>) => {
     console.log('🎯 Service IDs for provider:', serviceIds);
 
     // Helper function to process location data
-    function processLocation(rawLocation: any) {
-      if (!rawLocation) return null;
+   // Improved location processing function
+function processLocation(rawLocation: any) {
+  if (!rawLocation) {
+    console.log('📍 No raw location data');
+    return null;
+  }
 
+  try {
+    // If it's already an object, use it directly
+    if (typeof rawLocation === 'object' && rawLocation !== null) {
+      console.log('📍 Location is already an object:', rawLocation);
+      
+      // Check for valid coordinates or address
+      const hasValidCoords = (
+        rawLocation.lat !== null && 
+        rawLocation.lat !== undefined && 
+        rawLocation.lng !== null && 
+        rawLocation.lng !== undefined
+      );
+      
+      const hasValidAddress = (
+        rawLocation.address && 
+        rawLocation.address !== 'Not specified' && 
+        rawLocation.address !== '{}' &&
+        rawLocation.address.trim() !== ''
+      );
+
+      if (hasValidCoords || hasValidAddress) {
+        return {
+          lat: rawLocation.lat || null,
+          lng: rawLocation.lng || null,
+          address: hasValidAddress ? rawLocation.address : null
+        };
+      }
+      
+      console.log('📍 Invalid location object:', rawLocation);
+      return null;
+    }
+
+    // If it's a string, try to parse it
+    if (typeof rawLocation === 'string') {
+      console.log('📍 Location is string:', rawLocation);
+      
+      // First, check if it's a valid JSON string
       try {
-        // Try to parse as JSON first
         const parsed = JSON.parse(rawLocation);
+        console.log('📍 Successfully parsed JSON location:', parsed);
         
-        // Check if it has lat/lng properties
         if (typeof parsed === 'object' && parsed !== null) {
-          // Check for empty/zero location
-          if (parsed.lat === 0 && parsed.lng === 0 && 
-              (!parsed.address || parsed.address === 'Not specified')) {
-            return null;
-          } else {
+          const hasValidCoords = (
+            parsed.lat !== null && 
+            parsed.lat !== undefined && 
+            parsed.lng !== null && 
+            parsed.lng !== undefined
+          );
+          
+          const hasValidAddress = (
+            parsed.address && 
+            parsed.address !== 'Not specified' && 
+            parsed.address !== '{}' &&
+            parsed.address.trim() !== ''
+          );
+
+          if (hasValidCoords || hasValidAddress) {
             return {
               lat: parsed.lat || null,
               lng: parsed.lng || null,
-              address: parsed.address && parsed.address !== 'Not specified' ? parsed.address : null
+              address: hasValidAddress ? parsed.address : null
             };
           }
-        } else {
-          return null;
         }
-      } catch {
-        // If JSON parsing fails, treat as plain text address
-        return {
-          address: rawLocation,
-          lat: null,
-          lng: null
-        };
+      } catch (parseError) {
+        console.log('📍 JSON parse failed, treating as plain text:', parseError);
+        // If JSON parsing fails, check if it's a valid plain text address
+        if (
+          rawLocation && 
+          rawLocation !== 'Not specified' && 
+          rawLocation !== '{}' &&
+          rawLocation.trim() !== ''
+        ) {
+          return {
+            lat: null,
+            lng: null,
+            address: rawLocation.trim()
+          };
+        }
       }
     }
+
+    console.log('📍 Location data is invalid:', rawLocation);
+    return null;
+
+  } catch (error) {
+    console.error('❌ Error processing location:', error, rawLocation);
+    return null;
+  }
+}
 
     // Helper function to format the response data
-    function formatResponseData(rows: any[]) {
-      if (!rows || !Array.isArray(rows)) {
-        console.warn('⚠️ Invalid rows data provided to formatResponseData:', rows);
-        return [];
-      }
+function formatResponseData(rows: any[]) {
+  if (!rows || !Array.isArray(rows)) {
+    console.warn('⚠️ Invalid rows data provided to formatResponseData:', rows);
+    return [];
+  }
 
-      return rows.map(row => {
-        try {
-          const location = processLocation(row.raw_location);
-          
-          // Remove raw_location and ensure created_at is included
-          const { raw_location, ...cleanRow } = row;
-          
-          return {
-            ...cleanRow,
-            location,
-            created_at: row.created_at,
-            createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
-          };
-        } catch (formatError) {
-          console.error('❌ Error formatting row:', { row, error: formatError });
-          // Return the row with minimal processing if formatting fails
-          const { raw_location, ...cleanRow } = row;
-          return {
-            ...cleanRow,
-            location: null,
-            created_at: row.created_at,
-            createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
-          };
-        }
+  return rows.map((row, index) => {
+    try {
+      console.log(`📍 Raw location data for row ${index}:`, {
+        id: row.id,
+        raw_location: row.raw_location,
+        type: typeof row.raw_location
       });
+
+      const location = processLocation(row.raw_location);
+      
+      console.log(`📍 Processed location for row ${index}:`, location);
+
+      const { raw_location, ...cleanRow } = row;
+      
+      return {
+        ...cleanRow,
+        location,
+        created_at: row.created_at,
+        createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+      };
+    } catch (formatError) {
+      console.error('❌ Error formatting row:', { row, error: formatError });
+      const { raw_location, ...cleanRow } = row;
+      return {
+        ...cleanRow,
+        location: null,
+        created_at: row.created_at,
+        createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+      };
     }
+  });
+}
 
     // Handle requests without location filtering
     if (!lat || !lng) {
