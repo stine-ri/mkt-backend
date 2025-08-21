@@ -178,6 +178,24 @@ app.get('/', async (c: Context<CustomContext>) => {
       }
     }
 
+    // Helper function to format the response data
+    function formatResponseData(rows: any[]) {
+      return rows.map(row => {
+        const location = processLocation(row.raw_location);
+        
+        // Remove raw_location and ensure created_at is included
+        const { raw_location, ...cleanRow } = row;
+        
+        return {
+          ...cleanRow,
+          location,
+          created_at: row.created_at, // Explicitly ensure created_at is included
+          // Format created_at as ISO string if it's not already
+          createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+        };
+      });
+    }
+
     // Handle requests without location filtering
     if (!lat || !lng) {
       console.log('📍 No coordinates provided, fetching all requests without location filter');
@@ -200,7 +218,17 @@ app.get('/', async (c: Context<CustomContext>) => {
 
         const results = await db.execute(sql`
           SELECT 
-            r.*,
+            r.id,
+            r.user_id,
+            r.service_id,
+            r.title,
+            r.description,
+            r.budget,
+            r.status,
+            r.created_at,
+            r.updated_at,
+            r.deadline,
+            r.college_filter_id,
             r.location as raw_location,
             u.email AS user_email, 
             u.role AS user_role,
@@ -232,17 +260,8 @@ app.get('/', async (c: Context<CustomContext>) => {
           showingAllServices: filterByServices !== 'true'
         });
 
-        // Process the results and format location
-        const formattedResults = results.rows.map(row => {
-          const location = processLocation(row.raw_location);
-          
-          // Remove raw_location and add processed location
-          const { raw_location, ...cleanRow } = row;
-          return {
-            ...cleanRow,
-            location,
-          };
-        });
+        // Process the results and format location and created_at
+        const formattedResults = formatResponseData(results.rows);
 
         return c.json(formattedResults);
 
@@ -294,10 +313,20 @@ app.get('/', async (c: Context<CustomContext>) => {
         ? sql`AND (r.college_filter_id IS NULL OR r.college_filter_id = ${provider.collegeId})`
         : sql``;
 
-      // Updated location-based query - also use raw_location approach
+      // Updated location-based query with explicit field selection
       const results = await db.execute(sql`
         SELECT 
-          r.*, 
+          r.id,
+          r.user_id,
+          r.service_id,
+          r.title,
+          r.description,
+          r.budget,
+          r.status,
+          r.created_at,
+          r.updated_at,
+          r.deadline,
+          r.college_filter_id,
           r.location as raw_location,
           u.email AS user_email, 
           u.role AS user_role,
@@ -324,15 +353,7 @@ app.get('/', async (c: Context<CustomContext>) => {
       `);
 
       // Process results and filter by distance in JavaScript
-      const processedResults = results.rows
-        .map(row => {
-          const location = processLocation(row.raw_location);
-          const { raw_location, ...cleanRow } = row;
-          return {
-            ...cleanRow,
-            location,
-          };
-        })
+      const processedResults = formatResponseData(results.rows)
         .filter(row => {
           // Only include rows with valid coordinates for distance filtering
           if (!row.location || !row.location.lat || !row.location.lng) {
@@ -349,6 +370,9 @@ app.get('/', async (c: Context<CustomContext>) => {
             Math.sin(dLng/2) * Math.sin(dLng/2);
           const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
           const distance = R * c;
+
+          // Add distance to the result for frontend use
+          row.distance = parseFloat(distance.toFixed(2));
 
           return distance <= numRange;
         })
