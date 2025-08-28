@@ -10,5 +10,6 @@ app.get('/', async (c) => {
   return c.json(collegeList);
 });
 
+//delete
 
 export default app;

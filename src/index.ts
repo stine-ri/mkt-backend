@@ -274,10 +274,85 @@ app.post('/api/colleges', async (c) => {
 });
 
 app.delete('/api/colleges/:id', async (c) => {
-  console.log('Protected route: DELETE /api/colleges/:id accessed');
-  const id = parseInt(c.req.param('id'));
-  await db.delete(schema.colleges).where(eq(schema.colleges.id, id));
-  return c.json({ message: 'College deleted' });
+  console.log('DELETE /api/colleges/:id route hit');
+  console.log('Request path:', c.req.path);
+  console.log('Request params:', c.req.param());
+  
+  try {
+    const id = parseInt(c.req.param('id'));
+    console.log('Parsed ID:', id);
+    
+    if (isNaN(id)) {
+      console.log('Invalid ID provided');
+      return c.json({ error: 'Invalid college ID' }, 400);
+    }
+
+    // Check if college exists
+    console.log('Checking if college exists...');
+    const existing = await db.query.colleges.findFirst({
+      where: eq(schema.colleges.id, id)
+    });
+    console.log('Existing college:', existing);
+
+    if (!existing) {
+      console.log('College not found');
+      return c.json({ error: 'College not found' }, 404);
+    }
+
+    // Try simple delete first (comment out dependency checks for now)
+    console.log('Attempting to delete college...');
+    await db.delete(schema.colleges).where(eq(schema.colleges.id, id));
+    console.log('College deleted successfully');
+    
+    return c.json({ 
+      success: true,
+      message: 'College deleted successfully' 
+    });
+    
+  }catch (error) {
+  if (error instanceof Error) {
+    console.error('Error in college deletion:', error);
+    console.error('Error stack:', error.stack);
+    console.error('Error name:', error.name);
+    console.error('Error message:', error.message);
+
+    return c.json(
+      {
+        error: 'Failed to delete college',
+        details: error.message,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+      },
+      500
+    );
+  } else {
+    // Handle unexpected non-Error cases
+    console.error('Unknown error:', error);
+    return c.json({ error: 'Unknown error occurred' }, 500);
+  }
+}
+});
+
+// Also add a test route to verify the route is being hit
+app.get('/api/colleges/:id/test', async (c) => {
+  console.log('Test route hit for college ID:', c.req.param('id'));
+  return c.json({ 
+    message: 'Test route working',
+    id: c.req.param('id'),
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Debug route to list all routes
+app.get('/debug/routes', (c) => {
+  return c.json({ 
+    message: 'Debug route working',
+    availableRoutes: [
+      'GET /api/colleges',
+      'POST /api/colleges', 
+      'DELETE /api/colleges/:id',
+      'GET /api/colleges/:id/test'
+    ]
+  });
 });
 
 app.post('/api/service-requests', async (c) => {
