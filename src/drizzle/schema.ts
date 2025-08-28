@@ -19,7 +19,7 @@ import {
   import { relations } from "drizzle-orm";
   
   // Enums
-export const roleEnum = pgEnum("role", ["admin", "service_provider", "client"]);
+export const roleEnum = pgEnum("role", ["admin", "service_provider", "client","product_seller"]);
   
 // Support ticket status enum
 export const ticketStatusEnum = pgEnum('ticket_status', ['pending', 'in_progress', 'resolved']);

@@ -99,6 +99,19 @@ export const roleMiddleware = (requiredRole: JwtPayload['role']) => {
   };
 };
 
+// Add this to your auth.middleware.ts
+export const providerOrSellerRoleAuth = async (c: Context<CustomContext>, next: Next) => {
+  const user = c.get('user');
+  console.log(`Provider/Seller middleware - user role: ${user?.role}`);
+
+  if (!user || (user.role !== 'service_provider' && user.role !== 'product_seller')) {
+    console.log('Provider/Seller role check failed - returning 403');
+    return c.json({ error: "Unauthorized - Provider or Seller access required" }, 403);
+  }
+  await next();
+};
+
 export const adminRoleAuth = roleMiddleware("admin");
 export const clientRoleAuth = roleMiddleware("client");
 export const serviceProviderRoleAuth = roleMiddleware("service_provider");
+export const productSellerRoleAuth = roleMiddleware("product_seller");

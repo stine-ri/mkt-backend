@@ -54,7 +54,7 @@ export const registerUser = async (c: Context) => {
         let providerId: number | null = null;
         
         // Create provider record only if role is service_provider
-        if (user.role === 'service_provider') {
+        if (user.role === 'service_provider' || user.role === 'product_seller') {
             try {
                 const nameParts = createdUser.full_name.split(' ');
                 const provider = await db.insert(providers).values({
@@ -131,12 +131,12 @@ export const loginUser = async (c: Context) => {
 
         // Handle provider ID for service providers
         let providerId: number | null = null;
-        if (authResponse.role === 'service_provider') {
-            const provider = await db.query.providers.findFirst({
+        if (authResponse.role === 'service_provider' || authResponse.role === 'product_seller') {
+                const provider = await db.query.providers.findFirst({
                 where: eq(providers.userId, authResponse.user.id),
                 columns: { id: true },
-            });
-            providerId = provider?.id ?? null;
+                });
+                 providerId = provider?.id ?? null;
         }
 
         // Create JWT payload

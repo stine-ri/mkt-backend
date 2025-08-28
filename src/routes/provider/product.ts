@@ -1,6 +1,5 @@
-// src/routes/products.ts
 import { Hono } from 'hono';
-import { eq, and, desc,ilike,or } from 'drizzle-orm';
+import { eq, and, desc, ilike, or } from 'drizzle-orm';
 import { db } from '../../drizzle/db.js';
 import { 
   products, 
@@ -9,7 +8,12 @@ import {
   users,
   categories
 } from '../../drizzle/schema.js';
-import { authMiddleware, serviceProviderRoleAuth } from '../../middleware/bearAuth.js';
+import { 
+  authMiddleware, 
+  serviceProviderRoleAuth,
+  productSellerRoleAuth,
+  providerOrSellerRoleAuth // Use this for both roles
+} from '../../middleware/bearAuth.js';
 
 import { 
   FileUploadError,
@@ -20,27 +24,23 @@ import { uploadToCloudinary, deleteFromCloudinary } from '../../utils/cloudinary
 
 const product = new Hono()
   .use('*', authMiddleware)
-  .use('*', serviceProviderRoleAuth);
-
-
-
-
+  .use('*', providerOrSellerRoleAuth); // Changed from serviceProviderRoleAuth
 
 // Get provider's products
-product.get('/my',  async (c) => {
+product.get('/my', async (c) => {
   console.log('🔥 /api/product/my route hit');
   
   const user = c.get('user');
   
-  // First check if user is authenticated as service provider
-  if (user.role !== 'service_provider') {
-    return c.json({ error: 'Unauthorized - not a service provider' }, 403);
+  // Updated to check for both service_provider and product_seller roles
+  if (user.role !== 'service_provider' && user.role !== 'product_seller') {
+    return c.json({ error: 'Unauthorized - not a service provider or product seller' }, 403);
   }
 
-  // Then check if providerId exists
+  // Check if providerId exists
   if (user.providerId === null || user.providerId === undefined) {
     return c.json({ 
-      error: 'Service provider account not properly linked',
+      error: 'Account not properly linked',
       details: 'No provider ID found for this user'
     }, 400);
   }
@@ -67,7 +67,7 @@ product.get('/my',  async (c) => {
     const formatted = result.map(p => ({
       ...p,
       images: p.images.map(i => i.url),
-       category: p.category 
+      category: p.category 
     }));
 
     return c.json(formatted);
@@ -78,7 +78,6 @@ product.get('/my',  async (c) => {
 });
 
 // Create new product
-
 product.post('/', async (c) => {
   const providerId = c.get('user').providerId;
   if (typeof providerId !== 'number') {
@@ -91,7 +90,7 @@ product.post('/', async (c) => {
   const name = formData.get('name')?.toString().trim();
   const description = formData.get('description')?.toString().trim();
   const price = formData.get('price')?.toString();
-  const category = formData.get('category')?.toString().trim(); // This will be converted to categoryId
+  const category = formData.get('category')?.toString().trim();
   const stock = formData.get('stock')?.toString().trim();
   const imageFiles = formData.getAll('images') as File[];
 
@@ -121,15 +120,12 @@ product.post('/', async (c) => {
   let uploadedImageUrls: string[] = [];
 
   try {
-    // Convert category to categoryId if needed
+    // Convert category to categoryId
     let categoryId: number | undefined;
     
-    // If category is a number (categoryId), use it directly
     if (!isNaN(parseInt(category))) {
       categoryId = parseInt(category);
     } else {
-      // If category is a string, find the corresponding categoryId
-      // You might want to add a query to find the category by name
       const foundCategory = await db.query.categories.findFirst({
         where: eq(categories.name, category)
       });
@@ -142,7 +138,7 @@ product.post('/', async (c) => {
       name,
       description,
       price: priceNum.toString(),
-      categoryId, // Use categoryId instead of category
+      categoryId,
       stock: stock ? parseInt(stock) : null,
       status: 'draft',
     }).returning();
@@ -182,7 +178,7 @@ product.post('/', async (c) => {
       successfulUploads.map(({ url, public_id }) => ({
         productId: productId!,
         url,
-        publicId: public_id // Store public_id for future deletion
+        publicId: public_id
       }))
     ).returning();
 
@@ -197,10 +193,8 @@ product.post('/', async (c) => {
     // Cleanup if something failed after product creation
     if (productId) {
       try {
-        // Delete the product if it was created
         await db.delete(products).where(eq(products.id, productId));
         
-        // Delete any uploaded files from Cloudinary
         const imagesToDelete = await db.query.productImages.findMany({
           where: eq(productImages.productId, productId),
           columns: { publicId: true }
@@ -220,7 +214,6 @@ product.post('/', async (c) => {
       }
     }
     
-    // Error response handling
     if (error instanceof ValidationError) {
       try {
         const details = JSON.parse(error.message);
@@ -248,8 +241,9 @@ product.post('/', async (c) => {
 product.patch('/:id/status', async (c) => {
   const providerId = c.get('user').providerId;
   if (typeof providerId !== 'number') {
-  return c.json({ error: 'Invalid provider ID' }, 400);
-}
+    return c.json({ error: 'Invalid provider ID' }, 400);
+  }
+  
   const productId = parseInt(c.req.param('id'));
   const { status } = await c.req.json();
 
@@ -293,13 +287,11 @@ product.delete('/:id', async (c) => {
 
   try {
     await db.transaction(async (tx) => {
-      // 1. Get all images to delete from Cloudinary
       const images = await tx.query.productImages.findMany({
         where: eq(productImages.productId, productId),
         columns: { publicId: true }
       });
 
-      // 2. Delete from database first
       await tx.delete(productImages)
         .where(eq(productImages.productId, productId));
       
@@ -309,7 +301,6 @@ product.delete('/:id', async (c) => {
           eq(products.providerId, providerId)
         ));
 
-      // 3. Delete from Cloudinary after successful DB deletion
       await Promise.allSettled(
         images.map(img => 
           img.publicId ? deleteFromCloudinary(img.publicId, c).catch((e: Error) => {
@@ -329,9 +320,10 @@ product.delete('/:id', async (c) => {
 // Get product sales
 product.get('/sales', async (c) => {
   const providerId = c.get('user').providerId;
-if (typeof providerId !== 'number') {
-  return c.json({ error: 'Invalid provider ID' }, 400);
-}
+  if (typeof providerId !== 'number') {
+    return c.json({ error: 'Invalid provider ID' }, 400);
+  }
+  
   try {
     const sales = await db.query.productSales.findMany({
       where: eq(productSales.providerId, providerId),
@@ -382,8 +374,9 @@ if (typeof providerId !== 'number') {
 product.patch('/sales/:id', async (c) => {
   const providerId = c.get('user').providerId;
   if (typeof providerId !== 'number') {
-  return c.json({ error: 'Invalid provider ID' }, 400);
-}
+    return c.json({ error: 'Invalid provider ID' }, 400);
+  }
+  
   const saleId = parseInt(c.req.param('id'));
   const { status } = await c.req.json();
 

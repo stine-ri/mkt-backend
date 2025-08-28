@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 
 interface AuthUserResponse {
     email: string;
-    role: 'admin' | 'service_provider' | 'client';
+    role: 'admin' | 'service_provider' | 'client' | 'product_seller';
     password: string;
     user: {
         id: number;
@@ -19,12 +19,12 @@ export const createAuthUserService = async (user: {
     email: string;
     contact_phone: string;
     address: string;
-    role: 'admin' | 'service_provider' | 'client';
+    role: 'admin' | 'service_provider' | 'client' | 'product_seller';
     password: string;
 }): Promise<{
     id: number;
     email: string;
-    role: 'admin' | 'service_provider' | 'client';
+    role: 'admin' | 'service_provider' | 'client' | 'product_seller';
     full_name: string;
 } | null> => {
     let createdUser;
