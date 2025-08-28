@@ -11,6 +11,7 @@ import {
     date,
     time,
      jsonb,
+      unique,
      index,
      numeric,
      pgEnum
@@ -328,6 +329,24 @@ export const categoriesRelations = relations(categories, ({ many }) => ({
   products: many(products),
 }));
 
+// Settings Table
+export const settings = pgTable('settings', {
+  id: serial('id').primaryKey(),
+  category: text('category').notNull(),
+  key: text('key').notNull(),
+  value: jsonb('value'),
+  isEncrypted: boolean('is_encrypted').default(false),
+  description: text('description'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => ({
+  // Add unique constraint
+  uniqueCategoryKey: unique('unique_category_key').on(table.category, table.key),
+  // Add index
+  categoryKeyIdx: index('idx_settings_category_key').on(table.category, table.key),
+}));
+
+
 // Add relations
 export const supportTicketsRelations = relations(supportTickets, ({ many, one }) => ({
   user: one(users, {
@@ -610,6 +629,9 @@ export type TSTicketResponse = typeof ticketResponses.$inferSelect;
 
 export type TITestimonials = typeof testimonials.$inferInsert;
 export type TSTestimonials = typeof testimonials.$inferSelect;
+
+export type TISettings = typeof settings.$inferInsert;
+export type TSSettings = typeof settings.$inferSelect;
 
 // Extend the base request type to include relations
 export type TSRequestsWithRelations = TSRequests & {

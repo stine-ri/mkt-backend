@@ -134,6 +134,13 @@
       "when": 1755682404093,
       "tag": "0018_curvy_tag",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1756388658624,
+      "tag": "0019_mighty_corsair",
+      "breakpoints": true
     }
   ]
 }

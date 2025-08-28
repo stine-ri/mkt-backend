@@ -51,7 +51,7 @@ importers:
         specifier: ^0.4.2
         version: 0.4.2(hono@4.8.10)
       nodemailer:
-        specifier: ^6.10.0
+        specifier: ^6.10.1
         version: 6.10.1
       pg:
         specifier: ^8.13.1

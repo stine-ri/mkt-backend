@@ -32,6 +32,9 @@ import notifications from './routes/provider/notifications.js';
 import testimonialsRouter from './routes/provider/testimonials.js';
 import adminCategories from './routes/provider/categories.js';
 import publicCategories from './routes/provider/categories.js';
+import { logger } from 'hono/logger';
+import { prettyJSON } from 'hono/pretty-json';
+import adminSettingsRoutes from './routes/provider/settings.js';
 import { Readable } from 'stream';
 
 import { eq, and, or, gte, lte, inArray } from 'drizzle-orm';
@@ -90,6 +93,8 @@ app.use('*', async (c, next) => {
 });
 
 
+app.use('*', logger());
+app.use('*', prettyJSON());
 
 // PUBLIC ROUTES (before auth middleware) - EXACT PATHS ONLY
 app.get('/', (c) => {
@@ -274,86 +279,56 @@ app.post('/api/colleges', async (c) => {
 });
 
 app.delete('/api/colleges/:id', async (c) => {
-  console.log('DELETE /api/colleges/:id route hit');
-  console.log('Request path:', c.req.path);
-  console.log('Request params:', c.req.param());
-  
   try {
     const id = parseInt(c.req.param('id'));
-    console.log('Parsed ID:', id);
     
     if (isNaN(id)) {
-      console.log('Invalid ID provided');
       return c.json({ error: 'Invalid college ID' }, 400);
     }
 
     // Check if college exists
-    console.log('Checking if college exists...');
     const existing = await db.query.colleges.findFirst({
       where: eq(schema.colleges.id, id)
     });
-    console.log('Existing college:', existing);
 
     if (!existing) {
-      console.log('College not found');
       return c.json({ error: 'College not found' }, 404);
     }
 
-    // Try simple delete first (comment out dependency checks for now)
-    console.log('Attempting to delete college...');
+    // Check if there are providers referencing this college
+    const providers = await db.query.providers.findMany({
+      where: eq(schema.providers.collegeId, id)
+    });
+
+    if (providers.length > 0) {
+      return c.json({ 
+        error: 'Cannot delete college',
+        message: 'This college has associated providers. Please reassign or delete those providers first.',
+        providerCount: providers.length
+      }, 409); // 409 Conflict status code
+    }
+
+    // If no providers reference this college, proceed with deletion
     await db.delete(schema.colleges).where(eq(schema.colleges.id, id));
-    console.log('College deleted successfully');
     
     return c.json({ 
       success: true,
       message: 'College deleted successfully' 
     });
     
-  }catch (error) {
-  if (error instanceof Error) {
+  } catch (error) {
     console.error('Error in college deletion:', error);
-    console.error('Error stack:', error.stack);
-    console.error('Error name:', error.name);
-    console.error('Error message:', error.message);
-
     return c.json(
       {
         error: 'Failed to delete college',
-        details: error.message,
-        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+        details: error instanceof Error ? error.message : String(error),
       },
       500
     );
-  } else {
-    // Handle unexpected non-Error cases
-    console.error('Unknown error:', error);
-    return c.json({ error: 'Unknown error occurred' }, 500);
   }
-}
 });
 
-// Also add a test route to verify the route is being hit
-app.get('/api/colleges/:id/test', async (c) => {
-  console.log('Test route hit for college ID:', c.req.param('id'));
-  return c.json({ 
-    message: 'Test route working',
-    id: c.req.param('id'),
-    timestamp: new Date().toISOString()
-  });
-});
 
-// Debug route to list all routes
-app.get('/debug/routes', (c) => {
-  return c.json({ 
-    message: 'Debug route working',
-    availableRoutes: [
-      'GET /api/colleges',
-      'POST /api/colleges', 
-      'DELETE /api/colleges/:id',
-      'GET /api/colleges/:id/test'
-    ]
-  });
-});
 
 app.post('/api/service-requests', async (c) => {
   console.log('Protected route: POST /api/service-requests accessed');
@@ -458,6 +433,40 @@ app.patch('/api/notifications/:id/read', async (c) => {
     .where(eq(schema.notifications.id, id));
   
   return c.json({ message: 'Notification marked as read' });
+});
+
+//settings
+// Health check route
+
+app.get('/', (c) => {
+  return c.json({
+    message: 'Marketplace API is running',
+    version: '1.0.0',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// Mount admin settings routes
+app.route('/api/admin/settings', adminSettingsRoutes);
+
+// Error handling middleware
+app.onError((err, c) => {
+  console.error('Application error:', err);
+  
+  return c.json({
+    error: 'Internal server error',
+    message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong',
+    timestamp: new Date().toISOString(),
+  }, 500);
+});
+
+// 404 handler
+app.notFound((c) => {
+  return c.json({
+    error: 'Not found',
+    message: `Route ${c.req.method} ${c.req.path} not found`,
+    timestamp: new Date().toISOString(),
+  }, 404);
 });
 
 // Create HTTP server and WebSocket server

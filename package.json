@@ -29,7 +29,7 @@
     "drizzle-orm": "^0.39.3",
     "hono": "^4.8.9",
     "hono-rate-limiter": "^0.4.2",
-    "nodemailer": "^6.10.0",
+    "nodemailer": "^6.10.1",
     "pg": "^8.13.1",
     "stripe": "^17.6.0",
     "ws": "^8.18.3",
