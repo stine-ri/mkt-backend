@@ -1,3 +1,4 @@
+// routes/auth/sms-reset.ts
 import { Hono } from 'hono';
 import { db } from '../../drizzle/db.js';
 import { 
@@ -8,12 +9,12 @@ import {
 } from '../../drizzle/schema.js';
 import { eq, and, gt } from 'drizzle-orm';
 import { generateRandomCode, hashPassword } from '../../utils/auth.js';
-import { sendSMS, sendSMSXml,sendMockSMS  } from '../../services/smsService.js';
-import { sendVerificationEmail } from '../../services/email.js';
+import { sendSMS, sendMockSMS } from '../../services/smsService.js';
+import { logVerificationCode } from '../../services/verificationService.js';
+
 const app = new Hono();
 
 // Send SMS verification code
-
 app.post('/send-reset-sms', async (c) => {
   try {
     const { phone } = await c.req.json();
@@ -24,20 +25,11 @@ app.post('/send-reset-sms', async (c) => {
 
     // Check if user exists with this phone number
     const user = await db.query.users.findFirst({
-      where: eq(users.contact_phone, phone),
-      with: {
-        authentication: true
-      }
+      where: eq(users.contact_phone, phone)
     });
 
-    // For security, always return success even if user doesn't exist
-    if (!user) {
-      console.log('No user found with phone:', phone);
-      return c.json({ 
-        success: true, 
-        message: 'If this phone number is registered, a verification code will be sent' 
-      });
-    }
+    // Always return success for security, even if user doesn't exist
+    const responseMessage = 'If this phone number is registered, a verification code will be sent';
 
     // Generate verification code (6 digits)
     const verificationCode = generateRandomCode(6);
@@ -51,44 +43,49 @@ app.post('/send-reset-sms', async (c) => {
       used: false
     });
 
-    // Try SMS first
-    const message = `Your verification code is: ${verificationCode}. Valid for 10 minutes.`;
-    let smsResult = await sendSMS(phone, message);
+    // Log to console for debugging
+    logVerificationCode(phone, verificationCode, expiresAt);
 
-    // If SMS fails, try email fallback if user has email
-    if (!smsResult.success && user.email) {
-      console.log('SMS failed, trying email fallback...');
-      const emailSent = await sendVerificationEmail(user.email, verificationCode, phone);
-      
-      if (emailSent) {
-        console.log('Verification code sent via email');
-        return c.json({ 
-          success: true, 
-          message: 'Verification code sent to your email address',
-          debug: process.env.NODE_ENV === 'development' ? { code: verificationCode } : undefined
-        });
-      }
+    // Try to send SMS (use mock in development)
+    let smsResult;
+    if (process.env.NODE_ENV === 'production') {
+      const message = `Your verification code is: ${verificationCode}. Valid for 10 minutes.`;
+      smsResult = await sendSMS(phone, message);
+    } else {
+      // Use mock in development
+      const message = `[DEV] Your code: ${verificationCode}. Valid for 10 minutes.`;
+      smsResult = await sendMockSMS(phone, message);
     }
 
-    // If both SMS and email failed, still return success for security
-    // But include debug info in development
-    return c.json({ 
+    // Prepare response
+    const response: any = { 
       success: true, 
-      message: 'If this phone number is registered, a verification code will be sent',
-      debug: process.env.NODE_ENV === 'development' ? { 
+      message: responseMessage
+    };
+
+    // Include debug info in development
+    if (process.env.NODE_ENV !== 'production') {
+      response.debug = {
         code: verificationCode,
-        smsError: smsResult.error 
-      } : undefined
-    });
+        expiresAt: expiresAt.toISOString(),
+        smsSuccess: smsResult.success,
+        smsError: smsResult.error,
+        viewCodes: `${new URL(c.req.url).origin}/api/debug/codes`
+      };
+    }
+
+    return c.json(response);
 
   } catch (error) {
     console.error('Send SMS error:', error);
+    // Always return success for security
     return c.json({ 
       success: true, 
       message: 'If this phone number is registered, a verification code will be sent' 
     });
   }
 });
+
 
 // Verify SMS code
 app.post('/verify-sms-code', async (c) => {
