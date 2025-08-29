@@ -59,6 +59,9 @@ importers:
       pg:
         specifier: ^8.13.1
         version: 8.16.3
+      resend:
+        specifier: 6.2.0-preview-contacts.0
+        version: 6.2.0-preview-contacts.0
       stripe:
         specifier: ^17.6.0
         version: 17.7.0
@@ -1632,6 +1635,15 @@ packages:
   readdirp@4.1.2:
     resolution: {integrity: sha512-GDhwkLfywWL2s6vEjyhri+eXmfH6j1L7JE27WhqLeYzoh/A3DBaYGEj2H/HFZCn/kMfim73FXxEJTw06WtxQwg==}
     engines: {node: '>= 14.18.0'}
+
+  resend@6.2.0-preview-contacts.0:
+    resolution: {integrity: sha512-pbXz5Ia+7wF08lJsr6FiwLW5Sgoup2lm9jY4czBDvv8uUhRePR0ZGWKErkoaYazm8WkVibMZwuqCtugZQ+G+dA==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      '@react-email/render': ^1.1.0
+    peerDependenciesMeta:
+      '@react-email/render':
+        optional: true
 
   resolve-from@5.0.0:
     resolution: {integrity: sha512-qYg9KP24dD5qka9J47d0aVky0N+b4fTU89LN9iDnjB5waksiC49rvMB0PrUJQGoTmH50XPiqOvAjDfaijGxYZw==}
@@ -3591,6 +3603,8 @@ snapshots:
       util-deprecate: 1.0.2
 
   readdirp@4.1.2: {}
+
+  resend@6.2.0-preview-contacts.0: {}
 
   resolve-from@5.0.0: {}
 

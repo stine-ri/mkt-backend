@@ -9,11 +9,11 @@ import {
 import { eq, and, gt } from 'drizzle-orm';
 import { generateRandomCode, hashPassword } from '../../utils/auth.js';
 import { sendSMS, sendSMSXml,sendMockSMS  } from '../../services/smsService.js';
-
+import { sendVerificationEmail } from '../../services/email.js';
 const app = new Hono();
 
 // Send SMS verification code
-// In your send-reset-sms route
+
 app.post('/send-reset-sms', async (c) => {
   try {
     const { phone } = await c.req.json();
@@ -51,44 +51,38 @@ app.post('/send-reset-sms', async (c) => {
       used: false
     });
 
-    // Send SMS via QuickSMS - use mock for development
+    // Try SMS first
     const message = `Your verification code is: ${verificationCode}. Valid for 10 minutes.`;
-    
-    let smsResult;
-    if (process.env.NODE_ENV === 'development') {
-      // Use mock SMS in development
-      smsResult = await sendMockSMS(phone, message);
-    } else {
-      // Use real SMS in production
-      smsResult = await sendSMS(phone, message);
+    let smsResult = await sendSMS(phone, message);
+
+    // If SMS fails, try email fallback if user has email
+    if (!smsResult.success && user.email) {
+      console.log('SMS failed, trying email fallback...');
+      const emailSent = await sendVerificationEmail(user.email, verificationCode, phone);
       
-      // If SMS fails, try XML format as fallback
-      if (!smsResult.success) {
-        console.log('JSON API failed, trying XML format...');
-        smsResult = await sendSMSXml(phone, message);
+      if (emailSent) {
+        console.log('Verification code sent via email');
+        return c.json({ 
+          success: true, 
+          message: 'Verification code sent to your email address',
+          debug: process.env.NODE_ENV === 'development' ? { code: verificationCode } : undefined
+        });
       }
     }
 
-    if (!smsResult.success) {
-      console.error('SMS sending failed:', smsResult.error);
-      // Still return success to user for security reasons
-      // The code is stored in DB, user can request to see it via email or other means
-      return c.json({ 
-        success: true, 
-        message: 'If this phone number is registered, a verification code will be sent',
-        debug: process.env.NODE_ENV === 'development' ? { code: verificationCode } : undefined
-      });
-    }
-
+    // If both SMS and email failed, still return success for security
+    // But include debug info in development
     return c.json({ 
       success: true, 
       message: 'If this phone number is registered, a verification code will be sent',
-      debug: process.env.NODE_ENV === 'development' ? { code: verificationCode } : undefined
+      debug: process.env.NODE_ENV === 'development' ? { 
+        code: verificationCode,
+        smsError: smsResult.error 
+      } : undefined
     });
 
   } catch (error) {
     console.error('Send SMS error:', error);
-    // Return generic success message for security
     return c.json({ 
       success: true, 
       message: 'If this phone number is registered, a verification code will be sent' 

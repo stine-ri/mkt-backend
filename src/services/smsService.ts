@@ -27,18 +27,23 @@ function formatPhoneNumber(phone: string): string {
   return cleaned;
 }
 
+// services/smsService.ts - Updated with correct endpoints
 export const sendSMS = async (phone: string, message: string): Promise<SMSResponse> => {
   try {
     const formattedPhone = formatPhoneNumber(phone);
     
     console.log('Sending SMS to:', formattedPhone);
     console.log('Message:', message);
-    console.log('API Key:', process.env.QUICKSMS_API_KEY ? 'Present' : 'Missing');
-    console.log('Sender ID:', process.env.QUICKSMS_SENDER_ID);
 
-    // QuickSMS API integration - try different endpoints
-    const apiUrl = 'https://quicksms.advantasms.com/api/sendsms';
-    
+    // Try different QuickSMS API endpoints
+    const apiEndpoints = [
+      'https://quicksms.advantasms.com/api/v3/sendsms',
+      'https://quicksms.advantasms.com/api/v2/sendsms',
+      'https://quicksms.advantasms.com/api/v1/sendsms',
+      'https://quicksms.advantasms.com/sendsms',
+      'https://api.advantasms.com/sendsms',
+    ];
+
     const requestBody = {
       apikey: process.env.QUICKSMS_API_KEY,
       partnerID: process.env.QUICKSMS_PARTNER_ID,
@@ -47,54 +52,45 @@ export const sendSMS = async (phone: string, message: string): Promise<SMSRespon
       mobile: formattedPhone
     };
 
-    console.log('API Request:', requestBody);
-
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      body: JSON.stringify(requestBody)
-    });
-
-    console.log('API Response Status:', response.status);
+    let lastError;
     
-    let data;
-    try {
-      data = await response.json();
-      console.log('API Response Data:', data);
-    } catch (parseError) {
-      const textResponse = await response.text();
-      console.log('API Response Text:', textResponse);
-      throw new Error(`Failed to parse response: ${textResponse}`);
-    }
+    // Try each endpoint until one works
+    for (const endpoint of apiEndpoints) {
+      try {
+        console.log('Trying endpoint:', endpoint);
+        
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: JSON.stringify(requestBody)
+        });
 
-    // Check different possible success responses
-    if (response.ok) {
-      if (data.responses && data.responses[0] && data.responses[0]['response-code'] === '200') {
-        return {
-          success: true,
-          messageId: data.responses[0].messageid
-        };
-      } else if (data.status === 'Success') {
-        return {
-          success: true,
-          messageId: data.messageId || `quick-${Date.now()}`
-        };
-      } else if (data.success) {
-        return {
-          success: true,
-          messageId: data.messageId || `quick-${Date.now()}`
-        };
+        console.log('Endpoint response status:', response.status);
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log('Success with endpoint:', endpoint, data);
+          
+          if (data.responses?.[0]?.['response-code'] === '200' || data.status === 'Success') {
+            return {
+              success: true,
+              messageId: data.responses?.[0]?.messageid || `quick-${Date.now()}`
+            };
+          }
+        }
+      } catch (error) {
+        lastError = error;
+        console.log('Endpoint failed:', endpoint, error);
+        continue; // Try next endpoint
       }
     }
 
-    console.error('QuickSMS API error:', data);
-    return {
-      success: false,
-      error: data.message || data.error || data.responses?.[0]?.['response-description'] || 'Failed to send SMS'
-    };
+    // If all endpoints failed, try alternative SMS providers as fallback
+    console.log('All QuickSMS endpoints failed, trying alternative providers...');
+    return await tryAlternativeSMSProviders(phone, message);
 
   } catch (error) {
     console.error('SMS sending error:', error);
@@ -105,6 +101,42 @@ export const sendSMS = async (phone: string, message: string): Promise<SMSRespon
   }
 };
 
+// Alternative SMS providers as fallback
+const tryAlternativeSMSProviders = async (phone: string, message: string): Promise<SMSResponse> => {
+  const formattedPhone = formatPhoneNumber(phone);
+  
+  // Try Africa's Talking as fallback (you'd need to sign up for an account)
+  if (process.env.AFRICAS_TALKING_API_KEY && process.env.AFRICAS_TALKING_USERNAME) {
+    try {
+      const response = await fetch('https://api.africastalking.com/version1/messaging', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Accept': 'application/json',
+          'apiKey': process.env.AFRICAS_TALKING_API_KEY,
+        },
+        body: new URLSearchParams({
+          username: process.env.AFRICAS_TALKING_USERNAME,
+          to: formattedPhone,
+          message: message,
+          from: process.env.QUICKSMS_SENDER_ID || 'SMSAuth'
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        return { success: true, messageId: data.SMSMessageData?.Recipients?.[0]?.messageId };
+      }
+    } catch (error) {
+      console.log('Africa\'s Talking failed:', error);
+    }
+  }
+
+  return {
+    success: false,
+    error: 'All SMS providers failed. Please contact support.'
+  };
+};
 // Alternative: XML format (some SMS providers prefer this)
 export const sendSMSXml = async (phone: string, message: string): Promise<SMSResponse> => {
   try {
