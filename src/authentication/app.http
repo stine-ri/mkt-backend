@@ -170,5 +170,7 @@ Content-Type: application/json
     "email": "kasire@gmail.com",
     "password": "23451"
   }
-
-
+###
+curl -X POST localhost:3000/api/auth/send-reset-sms \
+  -H "Content-Type: application/json" \
+  -d '{"phone":"+254700000000"}'

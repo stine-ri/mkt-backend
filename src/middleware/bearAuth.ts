@@ -30,6 +30,10 @@ export const authMiddleware = async (c: Context<CustomContext>, next: Next) => {
     '/api/testimonials/public',
     '/api/public/categories', 
     '/api/public/categories/',
+        // ADD FORGOT PASSWORD ROUTES HERE
+    '/api/auth/send-reset-sms',
+    '/api/auth/verify-sms-code', 
+    '/api/auth/reset-password',
   ];
 
   const path = c.req.path;
