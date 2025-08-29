@@ -35,6 +35,7 @@ import publicCategories from './routes/provider/categories.js';
 import { logger } from 'hono/logger';
 import { prettyJSON } from 'hono/pretty-json';
 import adminSettingsRoutes from './routes/provider/settings.js';
+import smsResetRoutes from './routes/provider/smsReset.js';
 import { Readable } from 'stream';
 
 import { eq, and, or, gte, lte, inArray } from 'drizzle-orm';
@@ -61,11 +62,12 @@ interface ExtendedWebSocket extends WebSocket {
 const app = new Hono();
 
 // CORS configuration
-// Update your CORS middleware at the very top
 app.use('*', async (c, next) => {
   const allowedOrigins = [
     'http://localhost:5173',
-    'https://marketplace-frontend-delta-nine.vercel.app'
+    'https://marketplace-frontend-delta-nine.vercel.app',
+    'https://www.quisells.com',
+    'https://quisells.com',     
   ];
 
   const origin = c.req.header('origin') || '';
@@ -255,6 +257,9 @@ app.route('/api/support', supportRoutes);
 app.route('/api/notifications', notifications)
 app.route('/api/testimonials', testimonialsRouter);
 app.route('/api/admin/categories', adminCategories);
+
+//forgot password routes
+app.route('/api/auth', smsResetRoutes);
 
 // PROTECTED Admin endpoints (CREATE/UPDATE/DELETE operations)
 app.post('/api/services', async (c) => {

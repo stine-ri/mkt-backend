@@ -346,7 +346,41 @@ export const settings = pgTable('settings', {
   categoryKeyIdx: index('idx_settings_category_key').on(table.category, table.key),
 }));
 
+// SMS verification codes table
+export const smsVerificationCodes = pgTable('sms_verification_codes', {
+  id: serial('id').primaryKey(),
+  phone: varchar('phone', { length: 20 }).notNull(),
+  code: varchar('code', { length: 10 }).notNull(),
+  expiresAt: timestamp('expires_at').notNull(),
+  used: boolean('used').default(false),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => ({
+  phoneIdx: index('idx_sms_verification_phone').on(table.phone),
+}));
 
+// Password reset tokens table
+export const passwordResetTokens = pgTable('password_reset_tokens', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').notNull().references(() => users.id),
+  token: varchar('token', { length: 64 }).notNull(),
+  expiresAt: timestamp('expires_at').notNull(),
+  used: boolean('used').default(false),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => ({
+  tokenIdx: index('idx_password_reset_token').on(table.token),
+  userIdIdx: index('idx_password_reset_user_id').on(table.userId),
+}));
+
+// sms and password relations
+
+export const smsVerificationCodesRelations = relations(smsVerificationCodes, ({ one }) => ({}));
+
+export const passwordResetTokensRelations = relations(passwordResetTokens, ({ one }) => ({
+  user: one(users, {
+    fields: [passwordResetTokens.userId],
+    references: [users.id],
+  }),
+}));
 // Add relations
 export const supportTicketsRelations = relations(supportTickets, ({ many, one }) => ({
   user: one(users, {
@@ -632,6 +666,12 @@ export type TSTestimonials = typeof testimonials.$inferSelect;
 
 export type TISettings = typeof settings.$inferInsert;
 export type TSSettings = typeof settings.$inferSelect;
+
+export type TISmsVerificationCodes = typeof smsVerificationCodes.$inferInsert;
+export type TSSmsVerificationCodes = typeof smsVerificationCodes.$inferSelect;
+
+export type TIPasswordResetTokens = typeof passwordResetTokens.$inferInsert;
+export type TSPasswordResetTokens = typeof passwordResetTokens.$inferSelect;
 
 // Extend the base request type to include relations
 export type TSRequestsWithRelations = TSRequests & {

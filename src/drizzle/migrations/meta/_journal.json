@@ -148,6 +148,13 @@
       "when": 1756392921559,
       "tag": "0020_crazy_charles_xavier",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1756470841128,
+      "tag": "0021_wise_nick_fury",
+      "breakpoints": true
     }
   ]
 }
