@@ -8,11 +8,12 @@ import {
 } from '../../drizzle/schema.js';
 import { eq, and, gt } from 'drizzle-orm';
 import { generateRandomCode, hashPassword } from '../../utils/auth.js';
-import { sendSMS } from '../../services/smsService.js';
+import { sendSMS, sendSMSXml,sendMockSMS  } from '../../services/smsService.js';
 
 const app = new Hono();
 
 // Send SMS verification code
+// In your send-reset-sms route
 app.post('/send-reset-sms', async (c) => {
   try {
     const { phone } = await c.req.json();
@@ -29,8 +30,13 @@ app.post('/send-reset-sms', async (c) => {
       }
     });
 
+    // For security, always return success even if user doesn't exist
     if (!user) {
-      return c.json({ error: 'No account found with this phone number' }, 404);
+      console.log('No user found with phone:', phone);
+      return c.json({ 
+        success: true, 
+        message: 'If this phone number is registered, a verification code will be sent' 
+      });
     }
 
     // Generate verification code (6 digits)
@@ -45,22 +51,48 @@ app.post('/send-reset-sms', async (c) => {
       used: false
     });
 
-    // Send SMS via QuickSMS
+    // Send SMS via QuickSMS - use mock for development
     const message = `Your verification code is: ${verificationCode}. Valid for 10 minutes.`;
-    const smsResult = await sendSMS(phone, message);
+    
+    let smsResult;
+    if (process.env.NODE_ENV === 'development') {
+      // Use mock SMS in development
+      smsResult = await sendMockSMS(phone, message);
+    } else {
+      // Use real SMS in production
+      smsResult = await sendSMS(phone, message);
+      
+      // If SMS fails, try XML format as fallback
+      if (!smsResult.success) {
+        console.log('JSON API failed, trying XML format...');
+        smsResult = await sendSMSXml(phone, message);
+      }
+    }
 
     if (!smsResult.success) {
-      return c.json({ error: 'Failed to send SMS' }, 500);
+      console.error('SMS sending failed:', smsResult.error);
+      // Still return success to user for security reasons
+      // The code is stored in DB, user can request to see it via email or other means
+      return c.json({ 
+        success: true, 
+        message: 'If this phone number is registered, a verification code will be sent',
+        debug: process.env.NODE_ENV === 'development' ? { code: verificationCode } : undefined
+      });
     }
 
     return c.json({ 
       success: true, 
-      message: 'Verification code sent successfully' 
+      message: 'If this phone number is registered, a verification code will be sent',
+      debug: process.env.NODE_ENV === 'development' ? { code: verificationCode } : undefined
     });
 
   } catch (error) {
     console.error('Send SMS error:', error);
-    return c.json({ error: 'Internal server error' }, 500);
+    // Return generic success message for security
+    return c.json({ 
+      success: true, 
+      message: 'If this phone number is registered, a verification code will be sent' 
+    });
   }
 });
 
@@ -175,3 +207,5 @@ app.post('/reset-password', async (c) => {
 });
 
 export default app;
+
+
