@@ -2,11 +2,23 @@ import "dotenv/config";
 import { Context } from "hono";
 import { createAuthUserService, userLoginService } from "./auth.service.js";
 import * as bcrypt from "bcrypt";
-import { sign } from "hono/jwt";
+import { sign, verify } from "hono/jwt";
 import { providers, passwordResetTokens, Authentication } from "../drizzle/schema.js";
 import db from "../drizzle/db.js";
 import { eq } from 'drizzle-orm';
 import type { JwtPayload } from '../types/context.js';
+
+// Validate admin creation requests
+const validateAdminCreation = async (requestingUserToken: string | undefined): Promise<boolean> => {
+    if (!requestingUserToken) return false;
+    
+    try {
+        const decoded = await verify(requestingUserToken, process.env.JWT_SECRET as string) as JwtPayload;
+        return decoded.role === 'admin';
+    } catch {
+        return false;
+    }
+};
 
 export const registerUser = async (c: Context) => {
     try {
@@ -23,6 +35,25 @@ export const registerUser = async (c: Context) => {
                     contact_phone: !user.contact_phone ? "Phone number is required" : null
                 }
             }, 400);
+        }
+
+        // SECURITY: Validate admin creation
+        if (user.role === 'admin') {
+            const authHeader = c.req.header('Authorization');
+            const token = authHeader?.replace('Bearer ', '');
+            
+            const isAuthorizedAdmin = await validateAdminCreation(token);
+            if (!isAuthorizedAdmin) {
+                return c.json({ 
+                    error: "Unauthorized: Only existing admins can create admin accounts" 
+                }, 403);
+            }
+        }
+
+        // Validate allowed roles for public registration
+        const allowedRoles = ['client', 'service_provider', 'product_seller', 'admin'];
+        if (!allowedRoles.includes(user.role)) {
+            return c.json({ error: "Invalid role selection" }, 400);
         }
 
         // Validate email format
@@ -53,7 +84,7 @@ export const registerUser = async (c: Context) => {
 
         let providerId: number | null = null;
         
-        // Create provider record only if role is service_provider
+        // Create provider record only if role is service_provider or product_seller
         if (user.role === 'service_provider' || user.role === 'product_seller') {
             try {
                 const nameParts = createdUser.full_name.split(' ');
@@ -78,7 +109,7 @@ export const registerUser = async (c: Context) => {
         const payload: JwtPayload = {
             id: createdUser.id.toString(),
             email: createdUser.email,
-            role: createdUser.role as 'admin' | 'service_provider' | 'client',
+            role: createdUser.role as 'admin' | 'service_provider' | 'client' | 'product_seller',
             ...(providerId ? { providerId } : {})
         };
 
@@ -100,12 +131,21 @@ export const registerUser = async (c: Context) => {
 
     } catch (error: any) {
         console.error("Registration error:", error);
+        
+        // Handle specific database constraint errors
+        if (error.code === '23505') { // PostgreSQL unique violation
+            if (error.constraint?.includes('email')) {
+                return c.json({ error: "Email address already registered" }, 400);
+            }
+        }
+        
         return c.json({ 
             error: error?.message || "Registration failed",
             details: process.env.NODE_ENV === 'development' ? error.stack : undefined
         }, 400);
     }
 };
+
 export const loginUser = async (c: Context) => {
     try {
         const credentials = await c.req.json();
@@ -114,29 +154,42 @@ export const loginUser = async (c: Context) => {
             return c.json({ error: "Email and password are required" }, 400);
         }
 
+        console.log('Login attempt for:', credentials.email);
+        
         const authResponse = await userLoginService(credentials);
 
         if (!authResponse) {
-            return c.json({ error: "Invalid credentials" }, 401);
+            console.log('No auth response found');
+            return c.json({ error: "Invalid email or password" }, 401);
         }
 
+        console.log('Auth response found, checking password...');
+        
         const passwordMatch = await bcrypt.compare(
             credentials.password, 
             authResponse.password
         );
 
         if (!passwordMatch) {
-            return c.json({ error: "Invalid credentials" }, 401);
+            console.log('Password mismatch');
+            return c.json({ error: "Invalid email or password" }, 401);
         }
+
+        console.log('Password match successful, creating token...');
 
         // Handle provider ID for service providers
         let providerId: number | null = null;
         if (authResponse.role === 'service_provider' || authResponse.role === 'product_seller') {
+            try {
                 const provider = await db.query.providers.findFirst({
-                where: eq(providers.userId, authResponse.user.id),
-                columns: { id: true },
+                    where: eq(providers.userId, authResponse.user.id),
+                    columns: { id: true },
                 });
-                 providerId = provider?.id ?? null;
+                providerId = provider?.id ?? null;
+            } catch (error) {
+                console.error('Error fetching provider ID:', error);
+                // Continue without providerId
+            }
         }
 
         // Create JWT payload
@@ -148,6 +201,8 @@ export const loginUser = async (c: Context) => {
         };
 
         const token = await sign(payload, process.env.JWT_SECRET as string);
+
+        console.log('Login successful for user:', authResponse.user.id);
 
         return c.json({
             token,
@@ -167,75 +222,75 @@ export const loginUser = async (c: Context) => {
         return c.json({ 
             error: error?.message || "Login failed",
             details: process.env.NODE_ENV === 'development' ? error.stack : undefined
-        }, 400);
+        }, 500);
     }
 };
 
 // Get user from reset token
 export const getUserFromResetToken = async (c: Context) => {
-  try {
-    const { resetToken } = await c.req.json();
-    
-    // Verify the reset token
-    const tokenRecord = await db.query.passwordResetTokens.findFirst({
-      where: eq(passwordResetTokens.token, resetToken),
-      with: {
-        user: true
-      }
-    });
-    
-    if (!tokenRecord || tokenRecord.used || new Date() > tokenRecord.expiresAt) {
-      return c.json({ error: "Invalid or expired reset token" }, 400);
+    try {
+        const { resetToken } = await c.req.json();
+        
+        // Verify the reset token
+        const tokenRecord = await db.query.passwordResetTokens.findFirst({
+            where: eq(passwordResetTokens.token, resetToken),
+            with: {
+                user: true
+            }
+        });
+        
+        if (!tokenRecord || tokenRecord.used || new Date() > tokenRecord.expiresAt) {
+            return c.json({ error: "Invalid or expired reset token" }, 400);
+        }
+        
+        return c.json({
+            email: tokenRecord.user.email,
+            phone: tokenRecord.user.contact_phone
+        });
+    } catch (error) {
+        console.error("Error getting user from reset token:", error);
+        return c.json({ error: "Internal server error" }, 500);
     }
-    
-    return c.json({
-      email: tokenRecord.user.email,
-      phone: tokenRecord.user.contact_phone
-    });
-  } catch (error) {
-    console.error("Error getting user from reset token:", error);
-    return c.json({ error: "Internal server error" }, 500);
-  }
 };
 
 // Reset password endpoint
 export const resetPassword = async (c: Context) => {
-  try {
-    const { resetToken, newPassword } = await c.req.json();
-    
-    // Verify the reset token
-    const tokenRecord = await db.query.passwordResetTokens.findFirst({
-      where: eq(passwordResetTokens.token, resetToken),
-      with: {
-        user: true // Get the full user data
-      }
-    });
-    
-    if (!tokenRecord || tokenRecord.used || new Date() > tokenRecord.expiresAt) {
-      return c.json({ error: "Invalid or expired reset token" }, 400);
+    try {
+        const { resetToken, newPassword } = await c.req.json();
+        
+        // Verify the reset token
+        const tokenRecord = await db.query.passwordResetTokens.findFirst({
+            where: eq(passwordResetTokens.token, resetToken),
+            with: {
+                user: true // Get the full user data
+            }
+        });
+        
+        if (!tokenRecord || tokenRecord.used || new Date() > tokenRecord.expiresAt) {
+            return c.json({ error: "Invalid or expired reset token" }, 400);
+        }
+        
+        // Hash the new password
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        
+        // Update the user's password in Authentication table
+        // IMPORTANT: Also ensure the email is set correctly
+        await db.update(Authentication)
+            .set({ 
+                password: hashedPassword,
+                email: tokenRecord.user.email, // Ensure email is consistent
+                updated_at: new Date()
+            })
+            .where(eq(Authentication.user_id, tokenRecord.userId));
+        
+        // Mark the token as used
+        await db.update(passwordResetTokens)
+            .set({ used: true })
+            .where(eq(passwordResetTokens.id, tokenRecord.id));
+        
+        return c.json({ message: "Password reset successfully" });
+    } catch (error) {
+        console.error("Error resetting password:", error);
+        return c.json({ error: "Internal server error" }, 500);
     }
-    
-    // Hash the new password
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-    
-    // Update the user's password in Authentication table
-    // IMPORTANT: Also ensure the email is set correctly
-    await db.update(Authentication)
-      .set({ 
-        password: hashedPassword,
-        email: tokenRecord.user.email, // Ensure email is consistent
-        updated_at: new Date()
-      })
-      .where(eq(Authentication.user_id, tokenRecord.userId));
-    
-    // Mark the token as used
-    await db.update(passwordResetTokens)
-      .set({ used: true })
-      .where(eq(passwordResetTokens.id, tokenRecord.id));
-    
-    return c.json({ message: "Password reset successfully" });
-  } catch (error) {
-    console.error("Error resetting password:", error);
-    return c.json({ error: "Internal server error" }, 500);
-  }
 };
