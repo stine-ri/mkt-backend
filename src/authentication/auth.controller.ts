@@ -205,6 +205,9 @@ export const resetPassword = async (c: Context) => {
     // Verify the reset token
     const tokenRecord = await db.query.passwordResetTokens.findFirst({
       where: eq(passwordResetTokens.token, resetToken),
+      with: {
+        user: true // Get the full user data
+      }
     });
     
     if (!tokenRecord || tokenRecord.used || new Date() > tokenRecord.expiresAt) {
@@ -214,10 +217,12 @@ export const resetPassword = async (c: Context) => {
     // Hash the new password
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     
-    // Update the user's password
+    // Update the user's password in Authentication table
+    // IMPORTANT: Also ensure the email is set correctly
     await db.update(Authentication)
       .set({ 
         password: hashedPassword,
+        email: tokenRecord.user.email, // Ensure email is consistent
         updated_at: new Date()
       })
       .where(eq(Authentication.user_id, tokenRecord.userId));

@@ -71,42 +71,59 @@ export const createAuthUserService = async (user: {
 
 export const userLoginService = async (credentials: { email: string }): Promise<AuthUserResponse | null> => {
     try {
-        const result = await db.query.Authentication.findFirst({
+        console.log('Login attempt for email:', credentials.email);
+        
+        // First, try to find the user in the users table
+        const user = await db.query.users.findFirst({
+            where: eq(users.email, credentials.email),
             columns: {
+                id: true, // This maps to the user_id column in DB
                 email: true,
-                role: true,
-                password: true
-            }, 
-            where: eq(Authentication.email, credentials.email),
-            with: {
-                user: {
-                    columns: {
-                        id: true,
-                        full_name: true,
-                        contact_phone: true,
-                        address: true
-                    }
-                }
+                full_name: true,
+                contact_phone: true,
+                address: true,
+                role: true
             }
         });
 
-        if (!result?.email || !result.role || !result.password || !result.user?.id) {
+        if (!user) {
+            console.log('User not found in users table');
             return null;
         }
 
+        console.log('User found with ID:', user.id);
+
+        // Now find the authentication record using the user.id (which maps to user_id column)
+        const authResult = await db.query.Authentication.findFirst({
+            columns: {
+                email: true,
+                role: true,
+                password: true,
+                user_id: true
+            },
+            where: eq(Authentication.user_id, user.id), // user.id maps to the user_id column
+        });
+
+        if (!authResult?.password) {
+            console.log('Authentication record not found or no password set for user_id:', user.id);
+            return null;
+        }
+
+        console.log('Authentication record found');
+
         return {
-            email: result.email,
-            role: result.role as 'admin' | 'service_provider' | 'client',
-            password: result.password,
+            email: user.email, // Use email from users table
+            role: user.role as 'admin' | 'service_provider' | 'client' | 'product_seller',
+            password: authResult.password,
             user: {
-                id: result.user.id,
-                full_name: result.user.full_name,
-                contact_phone: result.user.contact_phone ?? null,
-                address: result.user.address ?? null
+                id: user.id,
+                full_name: user.full_name,
+                contact_phone: user.contact_phone ?? null,
+                address: user.address ?? null
             }
         };
     } catch (error) {
-        console.error('Login error:', error);
+        console.error('Login service error:', error);
         return null;
     }
 };
