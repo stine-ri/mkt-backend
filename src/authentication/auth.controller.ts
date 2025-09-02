@@ -3,7 +3,7 @@ import { Context } from "hono";
 import { createAuthUserService, userLoginService } from "./auth.service.js";
 import * as bcrypt from "bcrypt";
 import { sign } from "hono/jwt";
-import { providers } from "../drizzle/schema.js";
+import { providers, passwordResetTokens, Authentication } from "../drizzle/schema.js";
 import db from "../drizzle/db.js";
 import { eq } from 'drizzle-orm';
 import type { JwtPayload } from '../types/context.js';
@@ -169,4 +169,67 @@ export const loginUser = async (c: Context) => {
             details: process.env.NODE_ENV === 'development' ? error.stack : undefined
         }, 400);
     }
+};
+// Get user from reset token
+export const getUserFromResetToken = async (c: Context) => {
+  try {
+    const { resetToken } = await c.req.json();
+    
+    // Verify the reset token
+    const tokenRecord = await db.query.passwordResetTokens.findFirst({
+      where: eq(passwordResetTokens.token, resetToken),
+      with: {
+        user: true
+      }
+    });
+    
+    if (!tokenRecord || tokenRecord.used || new Date() > tokenRecord.expiresAt) {
+      return c.json({ error: "Invalid or expired reset token" }, 400);
+    }
+    
+    return c.json({
+      email: tokenRecord.user.email,
+      phone: tokenRecord.user.contact_phone
+    });
+  } catch (error) {
+    console.error("Error getting user from reset token:", error);
+    return c.json({ error: "Internal server error" }, 500);
+  }
+};
+
+// Reset password endpoint
+export const resetPassword = async (c: Context) => {
+  try {
+    const { resetToken, newPassword } = await c.req.json();
+    
+    // Verify the reset token
+    const tokenRecord = await db.query.passwordResetTokens.findFirst({
+      where: eq(passwordResetTokens.token, resetToken),
+    });
+    
+    if (!tokenRecord || tokenRecord.used || new Date() > tokenRecord.expiresAt) {
+      return c.json({ error: "Invalid or expired reset token" }, 400);
+    }
+    
+    // Hash the new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    
+    // Update the user's password
+    await db.update(Authentication)
+      .set({ 
+        password: hashedPassword,
+        updated_at: new Date()
+      })
+      .where(eq(Authentication.user_id, tokenRecord.userId));
+    
+    // Mark the token as used
+    await db.update(passwordResetTokens)
+      .set({ used: true })
+      .where(eq(passwordResetTokens.id, tokenRecord.id));
+    
+    return c.json({ message: "Password reset successfully" });
+  } catch (error) {
+    console.error("Error resetting password:", error);
+    return c.json({ error: "Internal server error" }, 500);
+  }
 };

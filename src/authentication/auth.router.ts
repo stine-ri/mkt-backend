@@ -1,7 +1,7 @@
  
  import { Hono } from 'hono';
  import { zValidator } from '@hono/zod-validator';
- import { registerUser, loginUser } from './auth.controller.js';
+ import { registerUser, loginUser,getUserFromResetToken,resetPassword } from './auth.controller.js';
  import { registerUserSchema, loginUserSchema } from './validator.js';
   
  export const authRouter = new Hono();
@@ -18,4 +18,6 @@
    }
  }), loginUser);
   
- 
+ // Add these to your existing auth routes
+authRouter.post('/api/auth/get-user-from-token', getUserFromResetToken);
+authRouter.post('/api/auth/reset-password', resetPassword);
