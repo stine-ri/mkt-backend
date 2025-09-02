@@ -170,6 +170,7 @@ export const loginUser = async (c: Context) => {
         }, 400);
     }
 };
+
 // Get user from reset token
 export const getUserFromResetToken = async (c: Context) => {
   try {

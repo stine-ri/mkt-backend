@@ -186,13 +186,55 @@ app.post('/reset-password', async (c) => {
       .set({ password: hashedPassword })
       .where(eq(Authentication.user_id, resetTokenRecord.userId));
 
+    // ✅ RETURN USER INFORMATION FOR AUTO-LOGIN
     return c.json({ 
       success: true, 
-      message: 'Password reset successfully' 
+      message: 'Password reset successfully',
+      user: {
+        email: resetTokenRecord.user.email,
+        id: resetTokenRecord.user.id,
+        phone: resetTokenRecord.user.contact_phone
+      }
     });
 
   } catch (error) {
     console.error('Reset password error:', error);
+    return c.json({ error: 'Internal server error' }, 500);
+  }
+});
+
+// Add this endpoint to get user info from reset token
+app.post('/get-user-from-reset-token', async (c) => {
+  try {
+    const { resetToken } = await c.req.json();
+    
+    if (!resetToken) {
+      return c.json({ error: 'Reset token is required' }, 400);
+    }
+
+    // Find valid reset token with user info
+    const tokenRecord = await db.query.passwordResetTokens.findFirst({
+      where: and(
+        eq(passwordResetTokens.token, resetToken),
+        eq(passwordResetTokens.used, false),
+        gt(passwordResetTokens.expiresAt, new Date())
+      ),
+      with: {
+        user: true
+      }
+    });
+    
+    if (!tokenRecord) {
+      return c.json({ error: 'Invalid or expired reset token' }, 400);
+    }
+    
+    return c.json({
+      email: tokenRecord.user.email,
+      phone: tokenRecord.user.contact_phone,
+      id: tokenRecord.user.id
+    });
+  } catch (error) {
+    console.error('Error getting user from reset token:', error);
     return c.json({ error: 'Internal server error' }, 500);
   }
 });
