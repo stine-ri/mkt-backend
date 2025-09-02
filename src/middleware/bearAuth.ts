@@ -34,6 +34,7 @@ export const authMiddleware = async (c: Context<CustomContext>, next: Next) => {
     '/api/auth/send-reset-sms',
     '/api/auth/verify-sms-code', 
     '/api/auth/reset-password',
+    '/api/auth/get-user-from-token', 
   ];
 
   const path = c.req.path;
