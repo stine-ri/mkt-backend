@@ -11,6 +11,7 @@ import { eq, and, gt } from 'drizzle-orm';
 import { generateRandomCode, hashPassword } from '../../utils/auth.js';
 import { sendSMS, sendMockSMS } from '../../services/smsService.js';
 import { logVerificationCode } from '../../services/verificationService.js';
+import bcrypt from 'bcrypt';
 
 const app = new Hono();
 
@@ -153,11 +154,7 @@ app.post('/reset-password', async (c) => {
   try {
     const { resetToken, newPassword } = await c.req.json();
 
-    if (!resetToken || !newPassword) {
-      return c.json({ error: 'Reset token and new password are required' }, 400);
-    }
-
-    // Find valid reset token
+    // 1. Find the valid reset token WITH user information
     const resetTokenRecord = await db.query.passwordResetTokens.findFirst({
       where: and(
         eq(passwordResetTokens.token, resetToken),
@@ -165,7 +162,7 @@ app.post('/reset-password', async (c) => {
         gt(passwordResetTokens.expiresAt, new Date())
       ),
       with: {
-        user: true
+        user: true // ← CRITICAL: This ensures we get the user data
       }
     });
 
@@ -173,27 +170,32 @@ app.post('/reset-password', async (c) => {
       return c.json({ error: 'Invalid or expired reset token' }, 400);
     }
 
-    // Mark token as used
+    console.log('Resetting password for user:', resetTokenRecord.user.id, resetTokenRecord.user.email);
+
+    // 2. Hash the new password (USE THE SAME METHOD AS REGISTRATION)
+    const hashedPassword = await bcrypt.hash(newPassword, 10); // ← Must use same salt rounds
+
+    // 3. Update the CORRECT user's password
+    const updateResult = await db.update(Authentication)
+      .set({ 
+        password: hashedPassword,
+        updated_at: new Date()
+      })
+      .where(eq(Authentication.user_id, resetTokenRecord.userId)); // ← Target by user_id
+
+    console.log('Password update result:', updateResult);
+
+    // 4. Mark token as used
     await db.update(passwordResetTokens)
       .set({ used: true })
       .where(eq(passwordResetTokens.id, resetTokenRecord.id));
 
-    // Hash new password
-    const hashedPassword = await hashPassword(newPassword);
-
-    // Update user password
-    await db.update(Authentication)
-      .set({ password: hashedPassword })
-      .where(eq(Authentication.user_id, resetTokenRecord.userId));
-
-    // ✅ RETURN USER INFORMATION FOR AUTO-LOGIN
     return c.json({ 
       success: true, 
       message: 'Password reset successfully',
       user: {
         email: resetTokenRecord.user.email,
-        id: resetTokenRecord.user.id,
-        phone: resetTokenRecord.user.contact_phone
+        id: resetTokenRecord.user.id
       }
     });
 
