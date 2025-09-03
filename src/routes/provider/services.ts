@@ -5,7 +5,7 @@ import { ilike, or } from 'drizzle-orm';
 
 const serviceRoutes = new Hono();
 // Add this to your serviceRoutes file
-serviceRoutes.get('/api/services/debug-test', async (c) => {
+serviceRoutes.get('/services/debug-test', async (c) => {
   console.log('=== DEBUG TEST ROUTE EXECUTING ===');
   console.log('This proves the code is updated');
   
@@ -15,7 +15,7 @@ serviceRoutes.get('/api/services/debug-test', async (c) => {
     codeVersion: 'updated-' + Date.now()
   });
 });
-serviceRoutes.get('/api/services', async (c) => {
+serviceRoutes.get('/services', async (c) => {
   try {
     const search = c.req.query('q');
     
