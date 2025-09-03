@@ -18,52 +18,33 @@ serviceRoutes.get('/services', async (c) => {
   try {
     const search = c.req.query('q');
     
-    console.log('=== SERVICE SEARCH DEBUG ===');
+    console.log('=== SERVICE SEARCH ===');
     console.log('Search parameter:', search);
+    
+    // Always get all services first
+    const allServices = await db.select().from(services);
     
     if (search && search.trim() !== '') {
       const searchTerm = search.trim().toLowerCase();
       console.log('Searching for:', searchTerm);
       
-      // Test 1: Try exact match first
-      console.log('--- Test 1: Exact match ---');
-      const exactResult = await db.select()
-        .from(services)
-        .where(ilike(services.name, 'Plumbing'));
-      console.log('Exact "Plumbing" results:', exactResult.length);
+      // Manual filtering (this will definitely work)
+      const filteredResults = allServices.filter(service => {
+        const nameMatch = service.name?.toLowerCase().includes(searchTerm) || false;
+        const categoryMatch = service.category?.toLowerCase().includes(searchTerm) || false;
+        const descriptionMatch = service.description?.toLowerCase().includes(searchTerm) || false;
+        
+        return nameMatch || categoryMatch || descriptionMatch;
+      });
       
-      // Test 2: Try with wildcards
-      console.log('--- Test 2: Wildcard match ---');
-      const wildcardResult = await db.select()
-        .from(services)
-        .where(ilike(services.name, '%Plumbing%'));
-      console.log('Wildcard "%Plumbing%" results:', wildcardResult.length);
+      console.log('Filtered results:', filteredResults.length);
+      console.log('Found services:', filteredResults.map(s => s.name));
       
-      // Test 3: Try case-sensitive
-      console.log('--- Test 3: Case sensitive ---');
-      const caseResult = await db.select()
-        .from(services)
-        .where(eq(services.name, 'Plumbing'));
-      console.log('Case sensitive results:', caseResult.length);
-      
-      // Test 4: Manual filter 
-      console.log('--- Test 4: Manual filter ---');
-      const allServices = await db.select().from(services);
-      const manualFilter = allServices.filter(service => 
-        service.name?.toLowerCase().includes(searchTerm) ||
-        service.category?.toLowerCase().includes(searchTerm) ||
-        service.description?.toLowerCase().includes(searchTerm)
-      );
-      console.log('Manual filter results:', manualFilter.length);
-      console.log('Manual filter data:', manualFilter.map(s => s.name));
-      
-      // Return manual filter for now
-      return c.json(manualFilter);
+      return c.json(filteredResults);
       
     } else {
       console.log('No search term - returning all services');
-      const result = await db.select().from(services);
-      return c.json(result);
+      return c.json(allServices);
     }
     
   } catch (err) {
@@ -71,7 +52,6 @@ serviceRoutes.get('/services', async (c) => {
     return c.json({ error: 'Failed to fetch services' }, 500);
   }
 });
-
 // Debug endpoint to test the schema
 serviceRoutes.get('/services/debug-schema', async (c) => {
   try {
