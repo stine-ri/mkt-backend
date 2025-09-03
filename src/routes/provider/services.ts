@@ -18,14 +18,20 @@ serviceRoutes.get('/services', async (c) => {
   try {
     const search = c.req.query('q');
     
-    console.log('=== SERVICE SEARCH ===');
-    console.log('Search parameter:', search);
+    console.log('=== SERVICE SEARCH DEBUG ===');
+    console.log('Raw search parameter:', search);
+    console.log('Search parameter type:', typeof search);
+    console.log('Search parameter length:', search?.length);
     
     if (search && search.trim() !== '') {
       const searchTerm = `%${search.trim()}%`;
-      console.log('Searching for:', searchTerm);
+      console.log('Formatted search term:', searchTerm);
       
-      // Use Drizzle ORM's query builder with correct field names
+      // First, let's see all services to compare
+      const allServices = await db.select().from(services);
+      console.log('All services in DB:', allServices.map(s => ({ id: s.id, name: s.name, category: s.category })));
+      
+      // Now try the search
       const result = await db.select()
         .from(services)
         .where(
@@ -36,8 +42,8 @@ serviceRoutes.get('/services', async (c) => {
           )
         );
       
-      console.log('Search results:', result.length);
-      console.log('Found services:', result.map(r => r.name));
+      console.log('Search results count:', result.length);
+      console.log('Search results:', result.map(r => ({ id: r.id, name: r.name, category: r.category })));
       
       return c.json(result);
       
