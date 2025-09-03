@@ -4,7 +4,6 @@ import { services } from '../../drizzle/schema.js';
 import { ilike, or } from 'drizzle-orm';
 
 const serviceRoutes = new Hono();
-// Add this to your serviceRoutes file
 serviceRoutes.get('/services/debug-test', async (c) => {
   console.log('=== DEBUG TEST ROUTE EXECUTING ===');
   console.log('This proves the code is updated');
@@ -55,7 +54,7 @@ serviceRoutes.get('/services', async (c) => {
 });
 
 // Debug endpoint to test the schema
-serviceRoutes.get('/api/services/debug-schema', async (c) => {
+serviceRoutes.get('/services/debug-schema', async (c) => {
   try {
     // Test a simple query to see the actual schema
     const testResult = await db.select().from(services).limit(1);
