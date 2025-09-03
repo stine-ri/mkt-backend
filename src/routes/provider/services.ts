@@ -4,7 +4,17 @@ import { services } from '../../drizzle/schema.js';
 import { ilike, or } from 'drizzle-orm';
 
 const serviceRoutes = new Hono();
-
+// Add this to your serviceRoutes file
+serviceRoutes.get('/api/services/debug-test', async (c) => {
+  console.log('=== DEBUG TEST ROUTE EXECUTING ===');
+  console.log('This proves the code is updated');
+  
+  return c.json({
+    message: 'Debug test successful!',
+    timestamp: new Date().toISOString(),
+    codeVersion: 'updated-' + Date.now()
+  });
+});
 serviceRoutes.get('/api/services', async (c) => {
   try {
     const search = c.req.query('q');
