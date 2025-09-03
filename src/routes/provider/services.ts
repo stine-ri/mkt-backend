@@ -18,33 +18,25 @@ serviceRoutes.get('/services', async (c) => {
   try {
     const search = c.req.query('q');
     
-    console.log('=== SERVICE SEARCH DEBUG ===');
-    console.log('Raw search parameter:', search);
-    console.log('Search parameter type:', typeof search);
-    console.log('Search parameter length:', search?.length);
+    console.log('=== SERVICE SEARCH ===');
+    console.log('Search parameter:', search);
     
     if (search && search.trim() !== '') {
-      const searchTerm = `%${search.trim()}%`;
-      console.log('Formatted search term:', searchTerm);
+      const searchTerm = search.trim().toLowerCase();
+      console.log('Searching for:', searchTerm);
       
-      // First, let's see all services to compare
-      const allServices = await db.select().from(services);
-      console.log('All services in DB:', allServices.map(s => ({ id: s.id, name: s.name, category: s.category })));
-      
-      // Now try the search
+      // Fixed Drizzle query - use like with % wildcards
       const result = await db.select()
         .from(services)
         .where(
           or(
-            ilike(services.name, searchTerm),
-            ilike(services.category, searchTerm),
-            ilike(services.description, searchTerm)
+            ilike(services.name, `%${searchTerm}%`),
+            ilike(services.category, `%${searchTerm}%`),
+            ilike(services.description, `%${searchTerm}%`)
           )
         );
       
-      console.log('Search results count:', result.length);
-      console.log('Search results:', result.map(r => ({ id: r.id, name: r.name, category: r.category })));
-      
+      console.log('Search results:', result.length);
       return c.json(result);
       
     } else {
