@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { eq, desc, ilike, or, and } from 'drizzle-orm';
+import { eq, desc, ilike, or, and, SQL } from 'drizzle-orm';
 import { db } from '../../drizzle/db.js';
 import { products, productImages, providers, categories } from '../../drizzle/schema.js';
 
@@ -8,9 +8,25 @@ const publicProduct = new Hono();
 // Public endpoint to get all published products
 publicProduct.get('/', async (c) => {
   try {
-    // Use relation-based query to include category information
+    const category = c.req.query('category'); // Add category parameter
+    
+     const conditions: SQL<unknown>[] = [eq(products.status, 'published')];
+    
+    // If category is specified and not 'all', add category filter
+     if (category && category !== 'all') {
+      const categoryId = parseInt(category);
+      if (!isNaN(categoryId)) {
+        conditions.push(eq(products.categoryId, categoryId));
+      }
+    }
+    
+      // Use the conditions array
+    const whereConditions = conditions.length > 1 
+      ? and(...conditions) 
+      : conditions[0];
+      
     const result = await db.query.products.findMany({
-      where: eq(products.status, 'published'),
+      where: whereConditions,
       orderBy: [desc(products.createdAt)],
       with: {
         images: {
