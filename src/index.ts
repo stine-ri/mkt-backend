@@ -31,7 +31,7 @@ import supportRoutes from './routes/provider/support.js';
 import notifications from './routes/provider/notifications.js';
 import testimonialsRouter from './routes/provider/testimonials.js';
 import adminCategories from './routes/provider/categories.js';
-import publicCategories from './routes/provider/categories.js';
+import publicCategories from './routes/provider/publicCategories.js';
 import { logger } from 'hono/logger';
 import { prettyJSON } from 'hono/pretty-json';
 import adminSettingsRoutes from './routes/provider/settings.js';
