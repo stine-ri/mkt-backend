@@ -78,7 +78,7 @@ serviceRoutes.get('/services/debug-schema', async (c) => {
 });
 
 //categories 
-serviceRoutes.get('/categories', async (c) => {
+serviceRoutes.get('/services/categories', async (c) => {
   try {
     // Get unique categories from services
     const allServices = await db.select().from(services);
