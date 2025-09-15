@@ -49,8 +49,8 @@ app.get('/', serviceProviderRoleAuth, async (c: Context<CustomContext>) => {
             lastName: provider.lastName,
             phoneNumber: provider.phoneNumber,
             collegeId: provider.collegeId,
-            latitude: provider.latitude,
-            longitude: provider.longitude,
+           latitude: provider.latitude !== null ? Number(provider.latitude) : null,
+            longitude: provider.longitude !== null ? Number(provider.longitude) : null,
             address: provider.address,
             bio: provider.bio,
             isProfileComplete: provider.isProfileComplete,
@@ -116,6 +116,13 @@ app.put('/', serviceProviderRoleAuth,  async (c) => {
           typeof service === 'number' ? service : service.id
         )
       : [];
+    // Ensure coordinates are properly formatted
+    const latitude = data.latitude !== null && data.latitude !== undefined 
+      ? Number(data.latitude) 
+      : null;
+    const longitude = data.longitude !== null && data.longitude !== undefined 
+      ? Number(data.longitude) 
+      : null;
 
     const existingProfile = await db.query.providers.findFirst({
       where: eq(providers.userId, userId),
@@ -146,6 +153,8 @@ app.put('/', serviceProviderRoleAuth,  async (c) => {
         .values({
           ...data,
           userId,
+          latitude: latitude,
+          longitude: longitude,
           isProfileComplete: true,
         })
         .returning();
@@ -211,7 +220,6 @@ app.put('/', serviceProviderRoleAuth,  async (c) => {
 });
 
 
-
 // Get all service providers (public route - no auth required)
 app.get('/all', async (c: Context<CustomContext>) => {
     try {
@@ -256,6 +264,8 @@ app.get('/all', async (c: Context<CustomContext>) => {
             if (!providersMap.has(provider.id)) {
                 providersMap.set(provider.id, {
                     ...provider,
+                    latitude: provider.latitude !== null ? Number(provider.latitude) : null,
+                    longitude: provider.longitude !== null ? Number(provider.longitude) : null,
                     college,
                     services: service ? [service] : []
                 });
@@ -318,8 +328,8 @@ app.get('/:id', async (c: Context<CustomContext>) => {
                 lastName: provider.lastName,
                 phoneNumber: provider.phoneNumber,
                 collegeId: provider.collegeId,
-                latitude: provider.latitude,
-                longitude: provider.longitude,
+                latitude: provider.latitude !== null ? Number(provider.latitude) : null,
+                longitude: provider.longitude !== null ? Number(provider.longitude) : null,
                 address: provider.address,
                 bio: provider.bio,
                 rating: provider.rating,
