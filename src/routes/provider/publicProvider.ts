@@ -2,61 +2,42 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { db } from '../../drizzle/db.js';
-import { providers, providerServices, services, colleges } from '../../drizzle/schema.js';
+import { providers, providerServices, services, colleges, pastWorks } from '../../drizzle/schema.js';
 import { eq, and } from 'drizzle-orm';
 import type { CustomContext } from '../../types/context.js';
 
 const publicProviderRoutes = new Hono<CustomContext>();
 
 // GET /api/provider/public/all
-
 publicProviderRoutes.get('/all', async (c: Context<CustomContext>) => {
   try {
-    const results = await db.select({
-      provider: providers,
-      providerService: providerServices, // Include providerServices
-      service: services,
-      college: colleges
-    })
-      .from(providers)
-      .leftJoin(providerServices, eq(providers.id, providerServices.providerId))
-      .leftJoin(services, eq(providerServices.serviceId, services.id))
-      .leftJoin(colleges, eq(providers.collegeId, colleges.id))
-      .where(eq(providers.isProfileComplete, true));
-
-    const providersMap = new Map<number, any>();
-
-    results.forEach(row => {
-      const provider = row.provider;
-      const providerService = row.providerService;
-      const service = row.service;
-      const college = row.college;
-
-      if (!providersMap.has(provider.id)) {
-        providersMap.set(provider.id, {
-          ...provider,
-          college: college || null,
-          services: service ? [{
-            ...service,
-            price: providerService?.price || null // Include the price from providerServices
-          }] : [],
-          rating: provider.rating || null,
-          completedRequests: provider.completedRequests || 0
-        });
-      } else {
-        const existing = providersMap.get(provider.id);
-        if (service && !existing.services.some((s: any) => s.id === service.id)) {
-          existing.services.push({
-            ...service,
-            price: providerService?.price || null // Include the price from providerServices
-          });
-        }
-      }
+    const providersList = await db.query.providers.findMany({
+      where: eq(providers.isProfileComplete, true),
+      with: {
+        college: true,
+        services: {
+          with: {
+            service: true,
+          },
+        },
+        pastWorks: true,
+      },
     });
+
+    // Transform the data to include prices
+    const transformedProviders = providersList.map(provider => ({
+      ...provider,
+      services: provider.services.map(ps => ({
+        ...ps.service,
+        price: ps.price // Include the price from providerServices
+      })),
+      latitude: provider.latitude !== null ? Number(provider.latitude) : null,
+      longitude: provider.longitude !== null ? Number(provider.longitude) : null,
+    }));
 
     return c.json({
       success: true,
-      data: Array.from(providersMap.values())
+      data: transformedProviders
     });
 
   } catch (error) {
@@ -68,6 +49,7 @@ publicProviderRoutes.get('/all', async (c: Context<CustomContext>) => {
     }, 500);
   }
 });
+
 // GET /api/provider/public/:id
 publicProviderRoutes.get('/:id', async (c: Context<CustomContext>) => {
   try {
@@ -97,7 +79,7 @@ publicProviderRoutes.get('/:id', async (c: Context<CustomContext>) => {
     }
 
     // Extract services with their prices from providerServices
-    const extractedServices = provider.services.map(ps => ({
+    const servicesWithPrices = provider.services.map(ps => ({
       ...ps.service,
       price: ps.price // Include the price from providerServices
     }));
@@ -108,17 +90,18 @@ publicProviderRoutes.get('/:id', async (c: Context<CustomContext>) => {
         id: provider.id,
         firstName: provider.firstName,
         lastName: provider.lastName,
-        college: provider.college,
-        services: extractedServices, // Services with prices
+        phoneNumber: provider.phoneNumber,
+        collegeId: provider.collegeId,
+        latitude: provider.latitude !== null ? Number(provider.latitude) : null,
+        longitude: provider.longitude !== null ? Number(provider.longitude) : null,
+        address: provider.address,
+        bio: provider.bio,
         rating: provider.rating,
         completedRequests: provider.completedRequests,
         profileImageUrl: provider.profileImageUrl,
-        bio: provider.bio,
+        college: provider.college,
+        services: servicesWithPrices, // Services with prices
         pastWorks: provider.pastWorks || [],
-        phoneNumber: provider.phoneNumber,
-        address: provider.address,
-        latitude: provider.latitude,
-        longitude: provider.longitude
       }
     });
 
