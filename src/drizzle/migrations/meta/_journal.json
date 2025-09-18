@@ -162,6 +162,13 @@
       "when": 1757939394524,
       "tag": "0022_fresh_revanche",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1758221626118,
+      "tag": "0023_tricky_alice",
+      "breakpoints": true
     }
   ]
 }

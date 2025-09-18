@@ -9,9 +9,15 @@ import type { CustomContext } from '../../types/context.js';
 const publicProviderRoutes = new Hono<CustomContext>();
 
 // GET /api/provider/public/all
+
 publicProviderRoutes.get('/all', async (c: Context<CustomContext>) => {
   try {
-    const results = await db.select()
+    const results = await db.select({
+      provider: providers,
+      providerService: providerServices, // Include providerServices
+      service: services,
+      college: colleges
+    })
       .from(providers)
       .leftJoin(providerServices, eq(providers.id, providerServices.providerId))
       .leftJoin(services, eq(providerServices.serviceId, services.id))
@@ -21,22 +27,29 @@ publicProviderRoutes.get('/all', async (c: Context<CustomContext>) => {
     const providersMap = new Map<number, any>();
 
     results.forEach(row => {
-      const provider = row.providers;
-      const service = row.services;
-      const college = row.colleges;
+      const provider = row.provider;
+      const providerService = row.providerService;
+      const service = row.service;
+      const college = row.college;
 
       if (!providersMap.has(provider.id)) {
         providersMap.set(provider.id, {
           ...provider,
           college: college || null,
-          services: service ? [service] : [],
+          services: service ? [{
+            ...service,
+            price: providerService?.price || null // Include the price from providerServices
+          }] : [],
           rating: provider.rating || null,
           completedRequests: provider.completedRequests || 0
         });
       } else {
         const existing = providersMap.get(provider.id);
         if (service && !existing.services.some((s: any) => s.id === service.id)) {
-          existing.services.push(service);
+          existing.services.push({
+            ...service,
+            price: providerService?.price || null // Include the price from providerServices
+          });
         }
       }
     });
@@ -55,7 +68,6 @@ publicProviderRoutes.get('/all', async (c: Context<CustomContext>) => {
     }, 500);
   }
 });
-
 // GET /api/provider/public/:id
 publicProviderRoutes.get('/:id', async (c: Context<CustomContext>) => {
   try {
@@ -84,8 +96,11 @@ publicProviderRoutes.get('/:id', async (c: Context<CustomContext>) => {
       }, 404);
     }
 
-    // Extract services from the nested structure
-    const extractedServices = provider.services.map(ps => ps.service);
+    // Extract services with their prices from providerServices
+    const extractedServices = provider.services.map(ps => ({
+      ...ps.service,
+      price: ps.price // Include the price from providerServices
+    }));
 
     return c.json({
       success: true,
@@ -94,7 +109,7 @@ publicProviderRoutes.get('/:id', async (c: Context<CustomContext>) => {
         firstName: provider.firstName,
         lastName: provider.lastName,
         college: provider.college,
-        services: extractedServices, // Direct array of services
+        services: extractedServices, // Services with prices
         rating: provider.rating,
         completedRequests: provider.completedRequests,
         profileImageUrl: provider.profileImageUrl,

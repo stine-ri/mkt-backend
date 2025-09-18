@@ -1,0 +1,1 @@
+ALTER TABLE "provider_services" ADD COLUMN "price" numeric(10, 2);

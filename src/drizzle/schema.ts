@@ -101,6 +101,7 @@ export const providers = pgTable('providers', {
 export const providerServices = pgTable('provider_services', {
   providerId: integer('provider_id').notNull().references(() => providers.id),
   serviceId: integer('service_id').notNull().references(() => services.id),
+  price: numeric('price', { precision: 10, scale: 2 }),
 }, (t) => ({
   pk: primaryKey(t.providerId, t.serviceId),
 }));
