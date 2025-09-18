@@ -31,13 +31,19 @@ app.get('/', serviceProviderRoleAuth, async (c: Context<CustomContext>) => {
                         service: true,
                     },
                 },
-                pastWorks: true, // Add pastWorks relation
+                pastWorks: true,
             },
         });
 
         if (!provider) {
             return c.json({ error: 'Profile not found' }, 404);
         }
+
+        // Extract services with their prices
+        const servicesWithPrices = provider.services.map(ps => ({
+            ...ps.service,
+            price: ps.price // Include the price from providerServices
+        }));
 
         return c.json({
             id: provider.id,
@@ -57,8 +63,8 @@ app.get('/', serviceProviderRoleAuth, async (c: Context<CustomContext>) => {
             createdAt: provider.createdAt,
             updatedAt: provider.updatedAt,
             college: provider.college,
-            services: provider.services.map(ps => ps.service),
-            pastWorks: provider.pastWorks, // Include pastWorks in response
+            services: servicesWithPrices, // Use services with prices
+            pastWorks: provider.pastWorks,
         });
     } catch (error) {
         console.error('Error fetching profile:', error);
@@ -123,12 +129,12 @@ app.put('/', serviceProviderRoleAuth, async (c) => {
         // Handle past works data - only process if provided in request
         const pastWorksData = Array.isArray(data.pastWorks) 
             ? data.pastWorks.map((work: any) => ({
-                id: work.id || null, // Keep ID if provided for updates
+                id: work.id || null,
                 imageUrl: work.imageUrl || '',
                 description: work.description || '',
-                shouldDelete: work.shouldDelete || false // Flag for deletion
+                shouldDelete: work.shouldDelete || false
             }))
-            : null; // Use null to distinguish from empty array
+            : null;
 
         // Normalize services to always be an array of IDs
         const serviceIds = Array.isArray(data.services)
@@ -148,7 +154,7 @@ app.put('/', serviceProviderRoleAuth, async (c) => {
         const existingProfile = await db.query.providers.findFirst({
             where: eq(providers.userId, userId),
             with: {
-                pastWorks: true, // Get existing past works
+                pastWorks: true,
             },
         });
 
@@ -203,16 +209,27 @@ app.put('/', serviceProviderRoleAuth, async (c) => {
                 .returning();
         }
 
-        // Update services
+        // Update services with prices
         await db
             .delete(providerServices)
             .where(eq(providerServices.providerId, provider.id));
 
         if (serviceIds.length > 0) {
+            // Extract services with their prices from the request data
+            const servicesWithPrices = Array.isArray(data.services)
+                ? data.services.map((service: any) => ({
+                    id: typeof service === 'number' ? service : service.id,
+                    price: typeof service === 'object' && service.price !== undefined 
+                        ? service.price 
+                        : null
+                }))
+                : [];
+
             await db.insert(providerServices).values(
-                serviceIds.map((serviceId: number) => ({
+                servicesWithPrices.map((service: any) => ({
                     providerId: provider.id,
-                    serviceId,
+                    serviceId: service.id,
+                    price: service.price // Include the price
                 }))
             );
         }
@@ -221,21 +238,19 @@ app.put('/', serviceProviderRoleAuth, async (c) => {
         if (pastWorksData !== null) {
             const existingWorks = existingProfile?.pastWorks || [];
             
-            // Identify works to delete (those marked for deletion or not in new data)
-            // ✅ Type-safe version
-const worksToDelete = existingWorks.filter(existingWork => {
-    // Type the callback parameter explicitly
-    const markedForDeletion = pastWorksData.some(
-        (work: { id: number | null; shouldDelete?: boolean }) => 
-            work.id === existingWork.id && work.shouldDelete
-    );
-    
-    const notInNewData = !pastWorksData.some(
-        (work: { id: number | null }) => work.id === existingWork.id
-    );
-    
-    return markedForDeletion || notInNewData;
-});
+            // Identify works to delete
+            const worksToDelete = existingWorks.filter(existingWork => {
+                const markedForDeletion = pastWorksData.some(
+                    (work: { id: number | null; shouldDelete?: boolean }) => 
+                        work.id === existingWork.id && work.shouldDelete
+                );
+                
+                const notInNewData = !pastWorksData.some(
+                    (work: { id: number | null }) => work.id === existingWork.id
+                );
+                
+                return markedForDeletion || notInNewData;
+            });
 
             // Delete identified works from Cloudinary and database
             for (const work of worksToDelete) {
@@ -253,7 +268,6 @@ const worksToDelete = existingWorks.filter(existingWork => {
             // Process new/updated works
             for (const work of pastWorksData) {
                 if (work.shouldDelete) {
-                    // Already handled above, skip
                     continue;
                 }
                 
@@ -276,7 +290,6 @@ const worksToDelete = existingWorks.filter(existingWork => {
                 }
             }
         }
-        // If pastWorksData is null, we don't modify past works at all
 
         // Fetch the updated profile with all relations
         const updatedProfile = await db.query.providers.findFirst({
@@ -296,6 +309,12 @@ const worksToDelete = existingWorks.filter(existingWork => {
             return c.json({ error: 'Failed to retrieve updated profile' }, 500);
         }
 
+        // Extract services with their prices
+        const servicesWithPrices = updatedProfile.services.map(ps => ({
+            ...ps.service,
+            price: ps.price // Include the price from providerServices
+        }));
+
         return c.json({
             id: updatedProfile.id,
             userId: updatedProfile.userId,
@@ -314,7 +333,7 @@ const worksToDelete = existingWorks.filter(existingWork => {
             createdAt: updatedProfile.createdAt,
             updatedAt: updatedProfile.updatedAt,
             college: updatedProfile.college,
-            services: updatedProfile.services.map(ps => ps.service),
+            services: servicesWithPrices, // Use the services with prices
             pastWorks: updatedProfile.pastWorks,
         });
         
