@@ -57,7 +57,7 @@ publicProviderRoutes.get('/all', async (c: Context<CustomContext>) => {
 });
 
 // GET /api/provider/public/:id
-publicProviderRoutes.get('/:id', (c, next) => next(), async (c: Context<CustomContext>) => {
+publicProviderRoutes.get('/:id', async (c: Context<CustomContext>) => {
   try {
     const providerId = parseInt(c.req.param('id'));
 
@@ -84,6 +84,9 @@ publicProviderRoutes.get('/:id', (c, next) => next(), async (c: Context<CustomCo
       }, 404);
     }
 
+    // Extract services from the nested structure
+    const extractedServices = provider.services.map(ps => ps.service);
+
     return c.json({
       success: true,
       data: {
@@ -91,12 +94,16 @@ publicProviderRoutes.get('/:id', (c, next) => next(), async (c: Context<CustomCo
         firstName: provider.firstName,
         lastName: provider.lastName,
         college: provider.college,
-        services: provider.services.map(ps => ps.service),
+        services: extractedServices, // Direct array of services
         rating: provider.rating,
         completedRequests: provider.completedRequests,
         profileImageUrl: provider.profileImageUrl,
         bio: provider.bio,
-         pastWorks: provider.pastWorks || [],
+        pastWorks: provider.pastWorks || [],
+        phoneNumber: provider.phoneNumber,
+        address: provider.address,
+        latitude: provider.latitude,
+        longitude: provider.longitude
       }
     });
 
