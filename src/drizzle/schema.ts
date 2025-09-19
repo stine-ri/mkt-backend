@@ -465,7 +465,11 @@ export const productsRelations = relations(products, ({ many, one }) => ({
     fields: [products.providerId],
     references: [providers.id],
   }),
-   category: one(categories, { 
+  seller: one(productSellers, {
+    fields: [products.sellerId],
+    references: [productSellers.id],
+  }),
+  category: one(categories, { 
     fields: [products.categoryId],
     references: [categories.id],
   }),
@@ -699,6 +703,20 @@ export const serviceRequestsRelations = relations(serviceRequests, ({ one }) => 
     references: [chatRooms.id],
   }),
 }));
+
+// Add the missing productSellers relations at the end of your schema file
+export const productSellersRelations = relations(productSellers, ({ many, one }) => ({
+  user: one(users, {
+    fields: [productSellers.userId],
+    references: [users.id],
+  }),
+  college: one(colleges, {
+    fields: [productSellers.collegeId],
+    references: [colleges.id],
+  }),
+  products: many(products),
+}));
+
 
 // Export types for TypeScript support
 export type TIUsers = typeof users.$inferInsert;
