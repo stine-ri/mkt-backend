@@ -39,6 +39,13 @@ export const ticketCategoryEnum = pgEnum('ticket_category', [
 ]);
 //testimonials enum 
 export const testimonialStatusEnum = pgEnum('testimonial_status', ['pending', 'approved', 'rejected']);
+
+// Service request status enum
+export const serviceRequestStatusEnum = pgEnum('service_request_status', ['pending', 'accepted', 'declined', 'completed']);
+
+// Service request urgency enum  
+export const serviceRequestUrgencyEnum = pgEnum('service_request_urgency', ['low', 'normal', 'high', 'urgent']);
+
   // Users Table
   export const users = pgTable("users", {
     id: serial("user_id").primaryKey(),
@@ -162,10 +169,36 @@ export const interests = pgTable('interests', {
   isShortlisted: boolean('is_shortlisted').default(false),
   status: text('status').default('pending').notNull(),
 });
+// Service Requests Table
+export const serviceRequests = pgTable('service_requests', {
+  id: serial('id').primaryKey(),
+  clientId: integer('client_id').references(() => users.id).notNull(),
+  providerId: integer('provider_id').references(() => providers.id).notNull(),
+  serviceId: integer('service_id').references(() => services.id).notNull(),
+  requestTitle: text('request_title').notNull(),
+  description: text('description'),
+  budgetMin: numeric('budget_min', { precision: 10, scale: 2 }),
+  budgetMax: numeric('budget_max', { precision: 10, scale: 2 }),
+  deadline: timestamp('deadline'),
+  status: serviceRequestStatusEnum('status').default('pending').notNull(),
+  urgency: serviceRequestUrgencyEnum('urgency').default('normal').notNull(),
+  location: text('location'),
+  clientNotes: text('client_notes'),
+  providerResponse: text('provider_response'),
+  chatRoomId: integer('chat_room_id').references(() => chatRooms.id),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+  respondedAt: timestamp('responded_at'),
+}, (table) => ({
+  clientIdIdx: index('idx_service_requests_client_id').on(table.clientId),
+  providerIdIdx: index('idx_service_requests_provider_id').on(table.providerId),
+  statusIdx: index('idx_service_requests_status').on(table.status),
+  createdAtIdx: index('idx_service_requests_created_at').on(table.createdAt),
+}));
 
 export const chatRooms = pgTable('chat_rooms', {
   id: serial('id').primaryKey(),
-  requestId: integer('request_id').notNull().references(() => requests.id),
+  requestId: integer('request_id').references(() => requests.id),
   clientId: integer('client_id').notNull().references(() => users.id),
   providerId: integer('provider_id').notNull().references(() => users.id),
   status: text('status').notNull().default('active'),
@@ -618,6 +651,27 @@ export const testimonialsRelations = relations(testimonials, ({ one }) => ({
     relationName: 'moderatedTestimonials'
   }),
 }));
+
+// Add relations for service requests
+export const serviceRequestsRelations = relations(serviceRequests, ({ one }) => ({
+  client: one(users, {
+    fields: [serviceRequests.clientId],
+    references: [users.id],
+  }),
+  provider: one(providers, {
+    fields: [serviceRequests.providerId],
+    references: [providers.id],
+  }),
+  service: one(services, {
+    fields: [serviceRequests.serviceId],
+    references: [services.id],
+  }),
+  chatRoom: one(chatRooms, {
+    fields: [serviceRequests.chatRoomId],
+    references: [chatRooms.id],
+  }),
+}));
+
 // Export types for TypeScript support
 export type TIUsers = typeof users.$inferInsert;
 export type TSUsers = typeof users.$inferSelect;
@@ -699,4 +753,15 @@ export type TSTestimonialsWithRelations = TSTestimonials & {
   request?: TSRequests | null;
   provider?: TSProviders | null;
   moderator?: TSUsers | null;
+};
+
+// Add service request types
+export type TIServiceRequests = typeof serviceRequests.$inferInsert;
+export type TSServiceRequests = typeof serviceRequests.$inferSelect;
+
+export type TSServiceRequestsWithRelations = TSServiceRequests & {
+  client?: TSUsers | null;
+  provider?: TSProviders | null;
+  service?: TSServices | null;
+  chatRoom?: typeof chatRooms.$inferSelect | null;
 };
