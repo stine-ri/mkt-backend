@@ -605,83 +605,133 @@ app.get('/', async (c) => {
   }
 });
 
+//  Enhanced FormData processing with better debugging
 app.post('/', async (c) => {
   const userId = Number(c.get('user').id);
   
-  // Handle both JSON and FormData
   let body: any;
   let imageFiles: File[] = [];
   
   const contentType = c.req.header('content-type') || '';
+  console.log('=== REQUEST DEBUG INFO ===');
+  console.log('Content-Type:', contentType);
+  console.log('User ID:', userId);
   
   if (contentType.includes('multipart/form-data')) {
-    // Handle FormData with images
-    const formData = await c.req.formData();
+    console.log('Processing multipart/form-data...');
     
-    body = {
-      productName: formData.get('productName')?.toString(),
-      description: formData.get('description')?.toString(),
-      desiredPrice: formData.get('desiredPrice')?.toString(),
-      isService: formData.get('isService')?.toString() === 'true',
-      serviceId: formData.get('serviceId')?.toString(),
-      location: formData.get('location')?.toString(),
-      collegeFilterId: formData.get('collegeFilterId')?.toString()
-    };
-    
-    imageFiles = formData.getAll('images') as File[];
+    try {
+      const formData = await c.req.formData();
+      
+      // Debug: Log all entries
+      console.log('=== FORM DATA ENTRIES ===');
+      const entries = Array.from(formData.entries());
+      entries.forEach(([key, value]) => {
+        if (value instanceof File) {
+          console.log(`${key}: File {
+            name: "${value.name}",
+            size: ${value.size} bytes,
+            type: "${value.type}",
+            lastModified: ${value.lastModified}
+          }`);
+        } else {
+          console.log(`${key}: "${value}"`);
+        }
+      });
+      
+      // Extract form fields
+      body = {
+        productName: formData.get('productName')?.toString() || null,
+        description: formData.get('description')?.toString() || null,
+        desiredPrice: formData.get('desiredPrice')?.toString() || null,
+        isService: formData.get('isService')?.toString() === 'true',
+        serviceId: formData.get('serviceId')?.toString() || null,
+        location: formData.get('location')?.toString() || null,
+        collegeFilterId: formData.get('collegeFilterId')?.toString() || null
+      };
+      
+      console.log('=== EXTRACTED BODY ===');
+      console.log(JSON.stringify(body, null, 2));
+      
+      // Extract images
+      const rawImageFiles = formData.getAll('images');
+      console.log(`=== IMAGE PROCESSING ===`);
+      console.log(`Raw image files count: ${rawImageFiles.length}`);
+      
+      // Filter and validate images
+      imageFiles = rawImageFiles.filter((file): file is File => {
+        if (!(file instanceof File)) {
+          console.warn('Non-file object found in images:', typeof file);
+          return false;
+        }
+        
+        if (file.size === 0) {
+          console.warn(`Empty file detected: ${file.name}`);
+          return false;
+        }
+        
+        if (!file.type.startsWith('image/')) {
+          console.warn(`Non-image file detected: ${file.name} (${file.type})`);
+          return false;
+        }
+        
+        console.log(`✓ Valid image: ${file.name} (${file.size} bytes, ${file.type})`);
+        return true;
+      });
+      
+      console.log(`Valid image files: ${imageFiles.length}/${rawImageFiles.length}`);
+      
+    } catch (error) {
+      console.error('FormData parsing error:', error);
+      return c.json({ 
+        error: 'Failed to parse form data', 
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }, 400);
+    }
   } else {
-    // Handle regular JSON with better error handling
+    // Handle JSON
     try {
       const rawBody = await c.req.text();
-      console.log('Raw request body:', rawBody);
+      console.log('Raw JSON body length:', rawBody.length);
       
       if (!rawBody || rawBody.trim() === '') {
         return c.json({ error: 'Request body is empty' }, 400);
       }
       
       body = JSON.parse(rawBody);
+      console.log('Parsed JSON body:', JSON.stringify(body, null, 2));
     } catch (error) {
       console.error('JSON parsing error:', error);
       return c.json({ 
         error: 'Invalid JSON format',
-        details: error instanceof Error ? error.message : 'Unknown JSON parsing error'
+        details: error instanceof Error ? error.message : 'Unknown error'
       }, 400);
     }
   }
 
-  // Enhanced validation with proper type checking
+  // Validation
   const validationErrors: string[] = [];
   
   if (body.isService) {
     if (!body.serviceId || isNaN(Number(body.serviceId))) {
-      validationErrors.push('Valid service ID is required for service requests');
+      validationErrors.push('Valid service ID is required');
     }
   } else {
     if (!body.productName || typeof body.productName !== 'string' || body.productName.trim() === '') {
-      validationErrors.push('Product name is required for product requests');
+      validationErrors.push('Product name is required');
     }
   }
   
-  // Validate desiredPrice - it's required based on your schema
-  if (body.desiredPrice === undefined || body.desiredPrice === null || body.desiredPrice === '') {
-    validationErrors.push('Desired price is required');
-  } else {
-    const price = Number(body.desiredPrice);
-    if (isNaN(price) || price < 0) {
-      validationErrors.push('Desired price must be a valid positive number');
-    }
+  if (!body.desiredPrice || isNaN(Number(body.desiredPrice)) || Number(body.desiredPrice) < 0) {
+    validationErrors.push('Valid desired price is required');
   }
   
-  // Validate location - it's required based on your schema
   if (!body.location || typeof body.location !== 'string' || body.location.trim() === '') {
     validationErrors.push('Location is required');
   }
   
-  if (body.collegeFilterId && isNaN(Number(body.collegeFilterId))) {
-    validationErrors.push('College filter ID must be a valid number');
-  }
-  
   if (validationErrors.length > 0) {
+    console.log('Validation errors:', validationErrors);
     return c.json({ 
       error: 'Validation failed', 
       details: validationErrors 
@@ -691,65 +741,82 @@ app.post('/', async (c) => {
   let requestId: number | null = null;
   
   try {
-    // Prepare insert data with proper type conversion and null handling
+    // Create request
     const insertData = {
       userId: userId,
       serviceId: body.isService ? Number(body.serviceId) : null,
       productName: !body.isService ? body.productName.toString().trim() : null,
       isService: Boolean(body.isService),
       description: body.description ? body.description.toString() : null,
-      desiredPrice: Number(body.desiredPrice), // This is now guaranteed to be a valid number
-      location: body.location.toString().trim(), // This is now guaranteed to be a non-empty string
+      desiredPrice: Number(body.desiredPrice),
+      location: body.location.toString().trim(),
       collegeFilterId: body.collegeFilterId ? Number(body.collegeFilterId) : null,
       status: 'open' as const
     };
 
-    console.log('Insert data:', insertData); // Debug log
-
-    // Create request
+    console.log('=== DATABASE INSERT ===');
+    console.log('Insert data:', JSON.stringify(insertData, null, 2));
+    
     const [request] = await db.insert(requests).values(insertData).returning();
-
     requestId = request.id;
+    
+    console.log(`✓ Request created with ID: ${requestId}`);
 
-    // Handle image uploads if present
+    // Handle image uploads
     if (imageFiles.length > 0) {
+      console.log(`=== IMAGE UPLOAD PROCESS ===`);
+      console.log(`Starting upload of ${imageFiles.length} images...`);
+      
       const uploadResults = await Promise.allSettled(
-        imageFiles.map(async (file) => {
+        imageFiles.map(async (file, index) => {
+          console.log(`Uploading image ${index + 1}/${imageFiles.length}: ${file.name}...`);
+          
           try {
             const folderPath = `users/${userId}/requests/${requestId}`;
-            const { url, public_id } = await uploadToCloudinary(file, folderPath, c);
-            return { url, public_id };
+            const result = await uploadToCloudinary(file, folderPath, c);
+            
+            console.log(`✓ Image ${index + 1} uploaded: ${result.url}`);
+            return result;
           } catch (error) {
-            console.error('Error uploading request image:', error);
-            throw new FileUploadError(`Failed to upload image: ${file.name}`);
+            console.error(`✗ Image ${index + 1} upload failed:`, error);
+            throw error;
           }
         })
       );
 
-      // Check for failed uploads
-      const failedUploads = uploadResults.filter(r => r.status === 'rejected');
-      if (failedUploads.length > 0) {
-        console.warn(`${failedUploads.length} image upload(s) failed for request ${requestId}`);
+      // Process results
+      const successful = uploadResults.filter(r => r.status === 'fulfilled');
+      const failed = uploadResults.filter(r => r.status === 'rejected');
+      
+      console.log(`Upload summary: ${successful.length} successful, ${failed.length} failed`);
+      
+      if (failed.length > 0) {
+        console.log('Failed uploads:');
+        failed.forEach((result, index) => {
+          console.log(`  ${index + 1}:`, result.reason);
+        });
       }
 
-      // Get successful uploads
-      const successfulUploads = uploadResults
-        .filter(r => r.status === 'fulfilled')
-        .map(r => (r as PromiseFulfilledResult<{ url: string, public_id: string }>).value);
-
-      // Create image records if any were successful
-      if (successfulUploads.length > 0) {
-        await db.insert(requestImages).values(
-          successfulUploads.map(({ url, public_id }) => ({
+      // Save successful uploads to database
+      if (successful.length > 0) {
+        const imageRecords = successful.map(result => {
+          const { url, public_id } = (result as PromiseFulfilledResult<any>).value;
+          return {
             requestId: requestId!,
             url,
             publicId: public_id
-          }))
-        );
+          };
+        });
+        
+        console.log(`Saving ${imageRecords.length} image records to database...`);
+        await db.insert(requestImages).values(imageRecords);
+        console.log('✓ Image records saved');
       }
+    } else {
+      console.log('No images to upload');
     }
 
-    // Fetch the complete request with images
+    // Fetch complete request with images
     const completeRequest = await db.query.requests.findFirst({
       where: eq(requests.id, requestId),
       with: {
@@ -761,19 +828,29 @@ app.post('/', async (c) => {
       }
     });
 
-    // Notify providers
-    await notifyNearbyProviders(request);
-
-    return c.json({
+    const response = {
       ...completeRequest,
       images: completeRequest?.images.map(img => img.url) || []
+    };
+    
+    console.log('=== FINAL RESPONSE ===');
+    console.log(`Request ID: ${response.id}`);
+    console.log(`Images: ${response.images.length}`);
+    response.images.forEach((url, index) => {
+      console.log(`  Image ${index + 1}: ${url}`);
     });
 
+    // Notify providers (existing logic)
+    await notifyNearbyProviders(request);
+
+    return c.json(response);
+
   } catch (error) {
-    console.error('Error creating request:', error);
+    console.error('=== ERROR IN REQUEST CREATION ===', error);
     
-    // Cleanup if something failed after request creation
+    // Cleanup on error
     if (requestId) {
+      console.log('Performing cleanup for failed request...');
       try {
         const imagesToDelete = await db.query.requestImages.findMany({
           where: eq(requestImages.requestId, requestId),
@@ -783,21 +860,13 @@ app.post('/', async (c) => {
         await Promise.allSettled([
           db.delete(requests).where(eq(requests.id, requestId)),
           ...imagesToDelete.map(img => 
-            img.publicId ? deleteFromCloudinary(img.publicId, c).catch((e: Error) => {
-              console.error('Failed to delete request image from Cloudinary:', e.message);
-            }) : Promise.resolve()
+            img.publicId ? deleteFromCloudinary(img.publicId, c) : Promise.resolve()
           )
         ]);
+        console.log('✓ Cleanup completed');
       } catch (cleanupError) {
-        console.error('Request cleanup failed:', cleanupError);
+        console.error('Cleanup failed:', cleanupError);
       }
-    }
-    
-    if (error instanceof FileUploadError) {
-      return c.json({ 
-        error: 'Image upload failed',
-        details: error.message 
-      }, 400);
     }
     
     return c.json({ 
