@@ -1,4 +1,4 @@
-// services/serviceRequests.js - Complete backend API file
+// services/serviceRequests.js - Status filtering fix
 import { Hono } from 'hono';
 import { db } from '../../drizzle/db.js';
 import { 
@@ -11,7 +11,7 @@ import {
   notifications,
   providerServices 
 } from '../../drizzle/schema.js';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, or } from 'drizzle-orm';
 import type { CustomContext } from '../../types/context.js';
 import { authMiddleware } from '../../middleware/bearAuth.js';
 
@@ -20,18 +20,15 @@ const app = new Hono<CustomContext>();
 // Apply auth middleware to all routes
 app.use('*', authMiddleware);
 
-// CREATE: Send a new service request
+// CREATE: Send a new service request - ALLOW ALL AUTHENTICATED USERS
 app.post('/', async (c) => {
   try {
     const user = c.get('user');
     const userId = Number(user.id);
     
-    // Only clients can make service requests
-    if (user.role !== 'client') {
-      return c.json({ 
-        success: false,
-        error: 'Only clients can make service requests' 
-      }, 403);
+    // Allow all authenticated users to make service requests
+    if (!user || !user.id) {
+      return c.json({ error: 'Authentication required' }, 401);
     }
 
     const {
@@ -79,6 +76,14 @@ app.post('/', async (c) => {
       return c.json({ 
         success: false,
         error: 'Provider does not offer this service' 
+      }, 400);
+    }
+
+    // Prevent users from requesting their own services
+    if (providerService.provider.user.id === userId) {
+      return c.json({ 
+        success: false,
+        error: 'Cannot request your own service' 
       }, 400);
     }
 
@@ -131,19 +136,21 @@ app.post('/', async (c) => {
   }
 });
 
-// READ: Get service requests for current user
+// READ: Get service requests for current user - HANDLE ALL ROLES
 app.get('/', async (c) => {
   try {
     const user = c.get('user');
     const userId = Number(user.id);
-    const { status } = c.req.query();
+    const { status, view } = c.req.query();
 
     let whereCondition;
     
-    if (user.role === 'client') {
+    // Handle different roles and views
+    if (view === 'outgoing' || user.role === 'client') {
+      // Show requests made by this user (outgoing)
       whereCondition = eq(serviceRequests.clientId, userId);
-    } else if (user.role === 'service_provider') {
-      // Get provider ID from user
+    } else if (view === 'incoming' || user.role === 'service_provider') {
+      // Show requests received by this provider (incoming)
       const provider = await db.query.providers.findFirst({
         where: eq(providers.userId, userId),
         columns: { id: true }
@@ -158,18 +165,20 @@ app.get('/', async (c) => {
       
       whereCondition = eq(serviceRequests.providerId, provider.id);
     } else {
-      return c.json({ 
-        success: false,
-        error: 'Unauthorized' 
-      }, 403);
+      // For other roles (admin, product_seller), show all requests they're involved in
+      whereCondition = or(
+        eq(serviceRequests.clientId, userId)
+        // Add additional conditions for other roles if needed
+      );
     }
 
-    // Add status filter if provided and valid
+    // Add status filter if provided and valid - FIX THE TYPE ISSUE HERE
     if (status) {
-      // Validate that the status is one of the allowed enum values
-      const validStatuses = ['pending', 'accepted', 'declined', 'completed'];
-      if (validStatuses.includes(status)) {
-        whereCondition = and(whereCondition, eq(serviceRequests.status, status as any));
+      const validStatuses = ['pending', 'accepted', 'declined', 'completed'] as const;
+      type ValidStatus = typeof validStatuses[number];
+      
+      if (validStatuses.includes(status as ValidStatus)) {
+        whereCondition = and(whereCondition, eq(serviceRequests.status, status as ValidStatus));
       } else {
         return c.json({ 
           success: false,
@@ -229,7 +238,7 @@ app.get('/', async (c) => {
   }
 });
 
-// READ: Get specific service request
+// READ: Get specific service request - ALLOW ALL INVOLVED PARTIES
 app.get('/:id', async (c) => {
   try {
     const requestId = Number(c.req.param('id'));
@@ -274,11 +283,12 @@ app.get('/:id', async (c) => {
       }, 404);
     }
 
-    // Check authorization
+    // Check authorization - allow client, provider, and admin
     const isClient = request.clientId === userId;
     const isProvider = request.provider?.user?.id === userId;
+    const isAdmin = user.role === 'admin';
 
-    if (!isClient && !isProvider) {
+    if (!isClient && !isProvider && !isAdmin) {
       return c.json({ 
         success: false,
         error: 'Unauthorized access' 
@@ -300,7 +310,7 @@ app.get('/:id', async (c) => {
   }
 });
 
-// UPDATE: Provider responds to service request (accept/decline)
+// UPDATE: Provider responds to service request (accept/decline) - ONLY SERVICE PROVIDERS
 app.post('/:id/respond', async (c) => {
   try {
     const requestId = Number(c.req.param('id'));
@@ -308,6 +318,7 @@ app.post('/:id/respond', async (c) => {
     const userId = Number(user.id);
     const { action, response } = await c.req.json();
 
+    // Only service providers can respond to requests
     if (user.role !== 'service_provider') {
       return c.json({ 
         success: false,
@@ -375,8 +386,8 @@ app.post('/:id/respond', async (c) => {
     if (action === 'accept') {
       [chatRoom] = await db.insert(chatRooms).values({
         clientId: request.clientId,
-        providerId: userId, // Use user ID for chat room
-        requestId: null, // Service requests don't use the general requests table
+        providerId: userId,
+        requestId: null,
         status: 'active',
         createdAt: new Date(),
         updatedAt: new Date()
@@ -426,7 +437,7 @@ app.post('/:id/respond', async (c) => {
   }
 });
 
-// UPDATE: Mark service request as completed
+// UPDATE: Mark service request as completed - ALLOW CLIENT AND PROVIDER
 app.post('/:id/complete', async (c) => {
   try {
     const requestId = Number(c.req.param('id'));
@@ -478,7 +489,7 @@ app.post('/:id/complete', async (c) => {
       .returning();
 
     // Create notification for the other party
-    const notifyUserId = isClient ? request.provider!.user!.id : request.clientId;
+    const notifyUserId = isClient ? request.provider.user.id : request.clientId;
     await db.insert(notifications).values({
       userId: notifyUserId,
       type: 'service_request_completed',
