@@ -59,18 +59,20 @@ interface ExtendedWebSocket extends WebSocket {
   ping(data?: any): void;
 }
  
- 
+
+const allowedOrigins = [
+  'http://localhost:5173',
+  'https://marketplace-frontend-delta-nine.vercel.app',
+  'https://www.quisells.com',
+  'https://quisells.com',
+  'wss://mkt-backend-sz2s.onrender.com',
+  'ws://mkt-backend-sz2s.onrender.com',
+];
+
 const app = new Hono();
 
-// CORS configuration
+// CORS configuration - REMOVE the allowedOrigins declaration from here
 app.use('*', async (c, next) => {
-  const allowedOrigins = [
-    'http://localhost:5173',
-    'https://marketplace-frontend-delta-nine.vercel.app',
-    'https://www.quisells.com',
-    'https://quisells.com',     
-  ];
-
   const origin = c.req.header('origin') || '';
   const isAllowed = allowedOrigins.includes(origin);
 
@@ -94,7 +96,6 @@ app.use('*', async (c, next) => {
   c.header('Access-Control-Allow-Origin', isAllowed ? origin : allowedOrigins[0]);
   c.header('Access-Control-Allow-Credentials', 'true');
 });
-
 
 app.use('*', logger());
 app.use('*', prettyJSON());
@@ -524,15 +525,49 @@ const server = createServer(async (req, res) => {
 });
 
 // Create WebSocket server on the same port
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ 
+  server,
+  // Handle protocol errors gracefully - use the correct signature
+  handleProtocols: (protocols: Set<string>, request: IncomingMessage) => {
+    if (protocols.has('chat')) return 'chat';
+    return false;
+  }
+});
 
-// Track active connections (userId -> ws)
+// Track connections
 const connections = new Map<string, ExtendedWebSocket>();
 
 wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
   const extendedWs = ws as ExtendedWebSocket;
   console.log('New WebSocket connection established');
   extendedWs.isAlive = true;
+
+  // Origin validation
+  const origin = req.headers.origin;
+  const isAllowed = allowedOrigins.includes(origin || '');
+  
+  if (!isAllowed) {
+    console.log('Rejected WebSocket connection from origin:', origin);
+    extendedWs.close(1008, 'Origin not allowed');
+    return;
+  }
+ // Send immediate connection acknowledgment
+  extendedWs.send(JSON.stringify({
+    type: 'connection_established',
+    timestamp: Date.now()
+  }));
+
+  // Set up authentication timeout (8 seconds)
+  const authTimeout = setTimeout(() => {
+    if (!extendedWs.user) {
+      console.log('WebSocket authentication timeout - closing connection');
+      extendedWs.send(JSON.stringify({
+        type: 'auth_timeout',
+        message: 'Authentication required within 8 seconds'
+      }));
+      extendedWs.close(1008, 'Authentication timeout');
+    }
+  }, 8000);
 
   // Ping/pong for connection health
   extendedWs.on('pong', () => {
@@ -676,8 +711,10 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
     }
   });
 
+ // Connection cleanup
   extendedWs.on('close', () => {
     console.log('WebSocket connection closed');
+    clearTimeout(authTimeout);
     if (extendedWs.user) {
       connections.delete(extendedWs.user.userId.toString());
     }
@@ -685,19 +722,25 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
 
   extendedWs.on('error', (error: Error) => {
     console.error('WebSocket error:', error);
+    clearTimeout(authTimeout);
   });
+
+
+// Initial ping to establish connection
+  extendedWs.ping(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
 });
 
-// Ping all clients every 30 seconds
+// Health monitoring
 const interval = setInterval(() => {
   wss.clients.forEach((ws) => {
     const extendedWs = ws as ExtendedWebSocket;
     if (!extendedWs.isAlive) {
+      console.log('Terminating unresponsive WebSocket connection');
       extendedWs.terminate();
       return;
     }
     extendedWs.isAlive = false;
-    extendedWs.ping();
+    extendedWs.ping(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
   });
 }, 30000);
 
