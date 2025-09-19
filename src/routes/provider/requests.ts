@@ -614,7 +614,7 @@ app.post('/', async (c) => {
   
   const contentType = c.req.header('content-type') || '';
   
- if (contentType.includes('multipart/form-data')) {
+  if (contentType.includes('multipart/form-data')) {
     // Handle FormData with images
     const formData = await c.req.formData();
     
@@ -622,7 +622,7 @@ app.post('/', async (c) => {
       productName: formData.get('productName')?.toString(),
       description: formData.get('description')?.toString(),
       desiredPrice: formData.get('desiredPrice')?.toString(),
-      isService: formData.get('isService')?.toString() === 'true', // Ensure boolean conversion
+      isService: formData.get('isService')?.toString() === 'true',
       serviceId: formData.get('serviceId')?.toString(),
       location: formData.get('location')?.toString(),
       collegeFilterId: formData.get('collegeFilterId')?.toString()
@@ -630,38 +630,84 @@ app.post('/', async (c) => {
     
     imageFiles = formData.getAll('images') as File[];
   } else {
-    // Handle regular JSON - add error handling for malformed JSON
+    // Handle regular JSON with better error handling
     try {
-      body = await c.req.json();
+      const rawBody = await c.req.text();
+      console.log('Raw request body:', rawBody);
+      
+      if (!rawBody || rawBody.trim() === '') {
+        return c.json({ error: 'Request body is empty' }, 400);
+      }
+      
+      body = JSON.parse(rawBody);
     } catch (error) {
       console.error('JSON parsing error:', error);
-      return c.json({ error: 'Invalid JSON format' }, 400);
+      return c.json({ 
+        error: 'Invalid JSON format',
+        details: error instanceof Error ? error.message : 'Unknown JSON parsing error'
+      }, 400);
     }
   }
 
-  // Validate request
-  if (body.isService && !body.serviceId) {
-    return c.json({ error: 'Service ID is required' }, 400);
+  // Enhanced validation with proper type checking
+  const validationErrors: string[] = [];
+  
+  if (body.isService) {
+    if (!body.serviceId || isNaN(Number(body.serviceId))) {
+      validationErrors.push('Valid service ID is required for service requests');
+    }
+  } else {
+    if (!body.productName || typeof body.productName !== 'string' || body.productName.trim() === '') {
+      validationErrors.push('Product name is required for product requests');
+    }
   }
-  if (!body.isService && !body.productName) {
-    return c.json({ error: 'Product name is required' }, 400);
+  
+  // Validate desiredPrice - it's required based on your schema
+  if (body.desiredPrice === undefined || body.desiredPrice === null || body.desiredPrice === '') {
+    validationErrors.push('Desired price is required');
+  } else {
+    const price = Number(body.desiredPrice);
+    if (isNaN(price) || price < 0) {
+      validationErrors.push('Desired price must be a valid positive number');
+    }
+  }
+  
+  // Validate location - it's required based on your schema
+  if (!body.location || typeof body.location !== 'string' || body.location.trim() === '') {
+    validationErrors.push('Location is required');
+  }
+  
+  if (body.collegeFilterId && isNaN(Number(body.collegeFilterId))) {
+    validationErrors.push('College filter ID must be a valid number');
+  }
+  
+  if (validationErrors.length > 0) {
+    return c.json({ 
+      error: 'Validation failed', 
+      details: validationErrors 
+    }, 400);
   }
 
   let requestId: number | null = null;
   
   try {
-    // Create request
-    const [request] = await db.insert(requests).values({
+    // Prepare insert data with proper type conversion and null handling
+    const insertData = {
       userId: userId,
       serviceId: body.isService ? Number(body.serviceId) : null,
-      productName: !body.isService ? body.productName : null,
+      productName: !body.isService ? body.productName.toString().trim() : null,
       isService: Boolean(body.isService),
-      description: body.description,
-      desiredPrice: Number(body.desiredPrice),
-      location: body.location,
+      description: body.description ? body.description.toString() : null,
+      desiredPrice: Number(body.desiredPrice), // This is now guaranteed to be a valid number
+      location: body.location.toString().trim(), // This is now guaranteed to be a non-empty string
       collegeFilterId: body.collegeFilterId ? Number(body.collegeFilterId) : null,
-      status: 'open'
-    }).returning();
+      status: 'open' as const
+    };
+
+    console.log('Insert data:', insertData); // Debug log
+
+    // Create request
+    const [request] = await db.insert(requests).values(insertData).returning();
 
     requestId = request.id;
 
@@ -756,7 +802,7 @@ app.post('/', async (c) => {
     
     return c.json({ 
       error: 'Failed to create request',
-      details: error instanceof Error ? error.message : undefined
+      details: error instanceof Error ? error.message : 'Internal server error'
     }, 500);
   }
 });
