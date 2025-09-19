@@ -255,11 +255,15 @@ export const saleStatusEnum = pgEnum('sale_status', ['pending', 'completed', 'ca
 export const products = pgTable('products', {
   id: serial('id').primaryKey(),
   providerId: integer('provider_id').notNull().references(() => providers.id),
+  sellerId: integer('seller_id').references(() => productSellers.id),
   name: text('name').notNull(),
   description: text('description').notNull(),
   price: numeric('price', { precision: 12, scale: 2 }).notNull(), // Using numeric for precise decimal storage
   categoryId: integer('category_id').references(() => categories.id), 
   stock: integer('stock'),
+  imageUrls: text('image_urls').array(), // Array of image URLs
+  condition: varchar('condition', { length: 50 }), // e.g., 'new', 'used', 'like new'
+  isActive: boolean('is_active').default(true),
   status: productStatusEnum('status').notNull().default('draft'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
@@ -290,6 +294,26 @@ export const productSales = pgTable('product_sales', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
+//product seller table
+export const productSellers = pgTable('product_sellers', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').notNull().references(() => users.id),
+  firstName: varchar('first_name', { length: 100 }),
+  lastName: varchar('last_name', { length: 100 }),
+  phoneNumber: varchar('phone_number', { length: 20 }),
+  collegeId: integer('college_id').references(() => colleges.id),
+  latitude: decimal('latitude', { precision: 10, scale: 8 }),
+  longitude: decimal('longitude', { precision: 11, scale: 8 }),
+  address: text('address'),
+  bio: text('bio'),
+  profileImageUrl: varchar('profile_image_url', { length: 500 }),
+  isProfileComplete: boolean('is_profile_complete').default(false),
+  rating: decimal('rating', { precision: 3, scale: 2 }).default('0.00'),
+  completedSales: integer('completed_sales').default(0),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
 // Support tickets table
 export const supportTickets = pgTable('support_tickets', {
   id: serial('id').primaryKey(),
