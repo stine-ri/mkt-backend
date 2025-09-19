@@ -428,7 +428,15 @@ export const passwordResetTokens = pgTable('password_reset_tokens', {
   tokenIdx: index('idx_password_reset_token').on(table.token),
   userIdIdx: index('idx_password_reset_user_id').on(table.userId),
 }));
-
+// Request Images Table
+export const requestImages = pgTable('request_images', {
+  id: serial('id').primaryKey(),
+  requestId: integer('request_id').notNull().references(() => requests.id, { onDelete: 'cascade' }),
+  url: varchar('url', { length: 500 }).notNull(),
+  publicId: varchar('public_id', { length: 255 }).notNull(), // For Cloudinary deletion
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow()
+});
 // sms and password relations
 
 export const smsVerificationCodesRelations = relations(smsVerificationCodes, ({ one }) => ({}));
@@ -614,6 +622,7 @@ export const requestsRelations = relations(requests, ({ one, many }) => ({
     fields: [requests.accepted_bid_id],
     references: [bids.id],
   }),
+  images: many(requestImages)
 }));
 
 export const bidsRelations = relations(bids, ({ one }) => ({
@@ -717,6 +726,13 @@ export const productSellersRelations = relations(productSellers, ({ many, one })
   products: many(products),
 }));
 
+// Add this to your relations section
+export const requestImagesRelations = relations(requestImages, ({ one }) => ({
+  request: one(requests, {
+    fields: [requestImages.requestId],
+    references: [requests.id]
+  })
+}));
 
 // Export types for TypeScript support
 export type TIUsers = typeof users.$inferInsert;

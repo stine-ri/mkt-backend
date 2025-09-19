@@ -1,12 +1,14 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { db } from '../../drizzle/db.js';
-import { requests, providers, colleges, bids, notifications, interests,TSInterests,TSProviders, TSBids, TSRequests, TSUsers , users, services} from '../../drizzle/schema.js';
+import { requests, providers, colleges, bids, notifications, interests,requestImages,TSInterests,TSProviders, TSBids, TSRequests, TSUsers , users, services} from '../../drizzle/schema.js';
 import { eq, and, lte, gte, sql , desc,count,ilike,or } from 'drizzle-orm';
 import {authMiddleware, serviceProviderRoleAuth  } from '../../middleware/bearAuth.js';
 import type { CustomContext } from '../../types/context.js';
 import { notifyNearbyProviders } from '../../lib/providerNotifications.js';
 import { RouteError } from '../../utils/error.js'; 
+import { uploadToCloudinary, deleteFromCloudinary } from '../../utils/cloudinary.js';
+import { FileUploadError } from '../../utils/error.js';
 
 const app = new Hono<CustomContext>();
 
@@ -605,7 +607,32 @@ app.get('/', async (c) => {
 
 app.post('/', async (c) => {
   const userId = Number(c.get('user').id);
-  const body = await c.req.json();
+  
+  // Handle both JSON and FormData
+  let body: any;
+  let imageFiles: File[] = [];
+  
+  const contentType = c.req.header('content-type') || '';
+  
+  if (contentType.includes('multipart/form-data')) {
+    // Handle FormData with images
+    const formData = await c.req.formData();
+    
+    body = {
+      productName: formData.get('productName')?.toString(),
+      description: formData.get('description')?.toString(),
+      desiredPrice: formData.get('desiredPrice')?.toString(),
+      isService: formData.get('isService') === 'true',
+      serviceId: formData.get('serviceId')?.toString(),
+      location: formData.get('location')?.toString(),
+      collegeFilterId: formData.get('collegeFilterId')?.toString()
+    };
+    
+    imageFiles = formData.getAll('images') as File[];
+  } else {
+    // Handle regular JSON
+    body = await c.req.json();
+  }
 
   // Validate request
   if (body.isService && !body.serviceId) {
@@ -615,23 +642,118 @@ app.post('/', async (c) => {
     return c.json({ error: 'Product name is required' }, 400);
   }
 
-  // Create request
-  const [request] = await db.insert(requests).values({
-    userId: userId,
-    serviceId: body.isService ? Number(body.serviceId) : null,
-    productName: !body.isService ? body.productName : null,
-    isService: Boolean(body.isService),
-    description: body.description,
-    desiredPrice: Number(body.desiredPrice),
-    location: body.location, // This should be a string matching your varchar(255) column
-    collegeFilterId: body.collegeFilterId ? Number(body.collegeFilterId) : null,
-    status: 'open'
-  }).returning();
+  let requestId: number | null = null;
+  
+  try {
+    // Create request
+    const [request] = await db.insert(requests).values({
+      userId: userId,
+      serviceId: body.isService ? Number(body.serviceId) : null,
+      productName: !body.isService ? body.productName : null,
+      isService: Boolean(body.isService),
+      description: body.description,
+      desiredPrice: Number(body.desiredPrice),
+      location: body.location,
+      collegeFilterId: body.collegeFilterId ? Number(body.collegeFilterId) : null,
+      status: 'open'
+    }).returning();
 
-  // Notify providers
-  await notifyNearbyProviders(request);
+    requestId = request.id;
 
-  return c.json(request);
+    // Handle image uploads if present
+    if (imageFiles.length > 0) {
+      const uploadResults = await Promise.allSettled(
+        imageFiles.map(async (file) => {
+          try {
+            const folderPath = `users/${userId}/requests/${requestId}`;
+            const { url, public_id } = await uploadToCloudinary(file, folderPath, c);
+            return { url, public_id };
+          } catch (error) {
+            console.error('Error uploading request image:', error);
+            throw new FileUploadError(`Failed to upload image: ${file.name}`);
+          }
+        })
+      );
+
+      // Check for failed uploads
+      const failedUploads = uploadResults.filter(r => r.status === 'rejected');
+      if (failedUploads.length > 0) {
+        console.warn(`${failedUploads.length} image upload(s) failed for request ${requestId}`);
+      }
+
+      // Get successful uploads
+      const successfulUploads = uploadResults
+        .filter(r => r.status === 'fulfilled')
+        .map(r => (r as PromiseFulfilledResult<{ url: string, public_id: string }>).value);
+
+      // Create image records if any were successful
+      if (successfulUploads.length > 0) {
+        await db.insert(requestImages).values(
+          successfulUploads.map(({ url, public_id }) => ({
+            requestId: requestId!,
+            url,
+            publicId: public_id
+          }))
+        );
+      }
+    }
+
+    // Fetch the complete request with images
+    const completeRequest = await db.query.requests.findFirst({
+      where: eq(requests.id, requestId),
+      with: {
+        images: {
+          columns: {
+            url: true
+          }
+        }
+      }
+    });
+
+    // Notify providers
+    await notifyNearbyProviders(request);
+
+    return c.json({
+      ...completeRequest,
+      images: completeRequest?.images.map(img => img.url) || []
+    });
+
+  } catch (error) {
+    console.error('Error creating request:', error);
+    
+    // Cleanup if something failed after request creation
+    if (requestId) {
+      try {
+        const imagesToDelete = await db.query.requestImages.findMany({
+          where: eq(requestImages.requestId, requestId),
+          columns: { publicId: true }
+        });
+        
+        await Promise.allSettled([
+          db.delete(requests).where(eq(requests.id, requestId)),
+          ...imagesToDelete.map(img => 
+            img.publicId ? deleteFromCloudinary(img.publicId, c).catch((e: Error) => {
+              console.error('Failed to delete request image from Cloudinary:', e.message);
+            }) : Promise.resolve()
+          )
+        ]);
+      } catch (cleanupError) {
+        console.error('Request cleanup failed:', cleanupError);
+      }
+    }
+    
+    if (error instanceof FileUploadError) {
+      return c.json({ 
+        error: 'Image upload failed',
+        details: error.message 
+      }, 400);
+    }
+    
+    return c.json({ 
+      error: 'Failed to create request',
+      details: error instanceof Error ? error.message : undefined
+    }, 500);
+  }
 });
 
 export default app;
