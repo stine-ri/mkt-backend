@@ -32,6 +32,7 @@ import notifications from './routes/provider/notifications.js';
 import testimonialsRouter from './routes/provider/testimonials.js';
 import adminCategories from './routes/provider/categories.js';
 import publicCategories from './routes/provider/publicCategories.js';
+import serviceRequestsRoutes from './routes/provider/ServiceRequests.js';
 import { logger } from 'hono/logger';
 import { prettyJSON } from 'hono/pretty-json';
 import adminSettingsRoutes from './routes/provider/settings.js';
@@ -257,7 +258,7 @@ app.route('/api/support', supportRoutes);
 app.route('/api/notifications', notifications)
 app.route('/api/testimonials', testimonialsRouter);
 app.route('/api/admin/categories', adminCategories);
-
+app.route('/api/service-requests', serviceRequestsRoutes);
 //forgot password routes
 app.route('/api/auth', smsResetRoutes);
 
