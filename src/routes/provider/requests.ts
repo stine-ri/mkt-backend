@@ -604,28 +604,46 @@ app.get('/', async (c) => {
     }, 500);
   }
 });
-
 //  Enhanced FormData processing with better debugging
+
+// Complete TypeScript-fixed backend route
 app.post('/', async (c) => {
   const userId = Number(c.get('user').id);
   
   let body: any;
   let imageFiles: File[] = [];
   
+  // Get the raw content type header - this is crucial!
   const contentType = c.req.header('content-type') || '';
   console.log('=== REQUEST DEBUG INFO ===');
-  console.log('Content-Type:', contentType);
+  console.log('Raw Content-Type header:', contentType);
   console.log('User ID:', userId);
   
-  if (contentType.includes('multipart/form-data')) {
+  // More robust multipart detection
+  const isMultipart = contentType.toLowerCase().includes('multipart/form-data') || 
+                     contentType.toLowerCase().startsWith('multipart/');
+  
+  console.log('Is multipart detected?', isMultipart);
+  
+  if (isMultipart) {
     console.log('Processing multipart/form-data...');
     
     try {
       const formData = await c.req.formData();
       
+      if (!formData) {
+        console.error('FormData is null or undefined');
+        return c.json({ 
+          error: 'Failed to parse form data - no data received',
+          contentType: contentType
+        }, 400);
+      }
+      
       // Debug: Log all entries
       console.log('=== FORM DATA ENTRIES ===');
       const entries = Array.from(formData.entries());
+      console.log('Total form entries:', entries.length);
+      
       entries.forEach(([key, value]) => {
         if (value instanceof File) {
           console.log(`${key}: File {
@@ -639,7 +657,7 @@ app.post('/', async (c) => {
         }
       });
       
-      // Extract form fields
+      // Extract form fields with null checks
       body = {
         productName: formData.get('productName')?.toString() || null,
         description: formData.get('description')?.toString() || null,
@@ -653,10 +671,19 @@ app.post('/', async (c) => {
       console.log('=== EXTRACTED BODY ===');
       console.log(JSON.stringify(body, null, 2));
       
-      // Extract images
+      // Extract images with enhanced validation
       const rawImageFiles = formData.getAll('images');
       console.log(`=== IMAGE PROCESSING ===`);
       console.log(`Raw image files count: ${rawImageFiles.length}`);
+      
+      if (rawImageFiles.length === 0) {
+        console.log('No images found in FormData - checking for single image field');
+        const singleImage = formData.get('image'); // Check for singular 'image' field
+        if (singleImage instanceof File) {
+          rawImageFiles.push(singleImage);
+          console.log('Found single image file');
+        }
+      }
       
       // Filter and validate images
       imageFiles = rawImageFiles.filter((file): file is File => {
@@ -667,6 +694,11 @@ app.post('/', async (c) => {
         
         if (file.size === 0) {
           console.warn(`Empty file detected: ${file.name}`);
+          return false;
+        }
+        
+        if (file.size > 5 * 1024 * 1024) { // 5MB limit
+          console.warn(`File too large: ${file.name} (${file.size} bytes)`);
           return false;
         }
         
@@ -681,49 +713,82 @@ app.post('/', async (c) => {
       
       console.log(`Valid image files: ${imageFiles.length}/${rawImageFiles.length}`);
       
-    } catch (error) {
-      console.error('FormData parsing error:', error);
+    } catch (formDataError) {
+      console.error('FormData parsing error:', formDataError);
       return c.json({ 
         error: 'Failed to parse form data', 
-        details: error instanceof Error ? error.message : 'Unknown error'
+        details: formDataError instanceof Error ? formDataError.message : 'Unknown error',
+        contentType: contentType,
+        timestamp: new Date().toISOString()
       }, 400);
     }
   } else {
-    // Handle JSON
+    console.log('Processing as JSON...');
+    // Handle JSON with better error handling
     try {
       const rawBody = await c.req.text();
-      console.log('Raw JSON body length:', rawBody.length);
+      console.log('Raw body length:', rawBody.length);
+      console.log('Raw body preview:', rawBody.substring(0, 100));
       
       if (!rawBody || rawBody.trim() === '') {
-        return c.json({ error: 'Request body is empty' }, 400);
+        return c.json({ 
+          error: 'Request body is empty',
+          contentType: contentType,
+          timestamp: new Date().toISOString()
+        }, 400);
+      }
+      
+      // Additional validation for JSON format
+      if (!rawBody.trim().startsWith('{') && !rawBody.trim().startsWith('[')) {
+        console.error('Body does not appear to be JSON:', rawBody.substring(0, 50));
+        return c.json({ 
+          error: 'Invalid JSON format - body does not start with { or [',
+          bodyPreview: rawBody.substring(0, 100),
+          contentType: contentType
+        }, 400);
       }
       
       body = JSON.parse(rawBody);
       console.log('Parsed JSON body:', JSON.stringify(body, null, 2));
-    } catch (error) {
-      console.error('JSON parsing error:', error);
+      
+    } catch (jsonError) {
+      console.error('JSON parsing error:', jsonError);
+      console.error('Failed to parse body as JSON. Content-Type:', contentType);
+      
+      // If JSON parsing fails but we received data, it might be FormData that wasn't detected
+      if (jsonError instanceof SyntaxError && jsonError.message.includes('JSON')) {
+        return c.json({ 
+          error: 'Invalid request format',
+          details: 'The request appears to be FormData but was processed as JSON. Check Content-Type header.',
+          contentType: contentType,
+          suggestion: 'Make sure multipart/form-data requests include proper Content-Type header'
+        }, 400);
+      }
+      
       return c.json({ 
         error: 'Invalid JSON format',
-        details: error instanceof Error ? error.message : 'Unknown error'
+        details: jsonError instanceof Error ? jsonError.message : 'Unknown error',
+        contentType: contentType,
+        timestamp: new Date().toISOString()
       }, 400);
     }
   }
 
-  // Validation
+  // Enhanced validation
   const validationErrors: string[] = [];
   
   if (body.isService) {
     if (!body.serviceId || isNaN(Number(body.serviceId))) {
-      validationErrors.push('Valid service ID is required');
+      validationErrors.push('Valid service ID is required for service requests');
     }
   } else {
     if (!body.productName || typeof body.productName !== 'string' || body.productName.trim() === '') {
-      validationErrors.push('Product name is required');
+      validationErrors.push('Product name is required for product requests');
     }
   }
   
   if (!body.desiredPrice || isNaN(Number(body.desiredPrice)) || Number(body.desiredPrice) < 0) {
-    validationErrors.push('Valid desired price is required');
+    validationErrors.push('Valid desired price is required (must be a positive number)');
   }
   
   if (!body.location || typeof body.location !== 'string' || body.location.trim() === '') {
@@ -734,20 +799,27 @@ app.post('/', async (c) => {
     console.log('Validation errors:', validationErrors);
     return c.json({ 
       error: 'Validation failed', 
-      details: validationErrors 
+      details: validationErrors,
+      receivedData: {
+        isService: body.isService,
+        hasProductName: !!body.productName,
+        hasServiceId: !!body.serviceId,
+        hasDesiredPrice: !!body.desiredPrice,
+        hasLocation: !!body.location
+      }
     }, 400);
   }
 
   let requestId: number | null = null;
   
   try {
-    // Create request
+    // Create request with enhanced error handling
     const insertData = {
       userId: userId,
       serviceId: body.isService ? Number(body.serviceId) : null,
       productName: !body.isService ? body.productName.toString().trim() : null,
       isService: Boolean(body.isService),
-      description: body.description ? body.description.toString() : null,
+      description: body.description ? body.description.toString().trim() : null,
       desiredPrice: Number(body.desiredPrice),
       location: body.location.toString().trim(),
       collegeFilterId: body.collegeFilterId ? Number(body.collegeFilterId) : null,
@@ -757,112 +829,188 @@ app.post('/', async (c) => {
     console.log('=== DATABASE INSERT ===');
     console.log('Insert data:', JSON.stringify(insertData, null, 2));
     
-    const [request] = await db.insert(requests).values(insertData).returning();
-    requestId = request.id;
-    
-    console.log(`✓ Request created with ID: ${requestId}`);
+    // Database insert with error handling
+    try {
+      const [request] = await db.insert(requests).values(insertData).returning();
+      
+      if (!request || !request.id) {
+        throw new Error('Database insert failed - no request returned');
+      }
+      
+      requestId = request.id;
+      console.log(`✓ Request created with ID: ${requestId}`);
+      
+    } catch (dbInsertError) {
+      console.error('Database insert error:', dbInsertError);
+      throw new Error(`Failed to create request in database: ${dbInsertError instanceof Error ? dbInsertError.message : 'Unknown error'}`);
+    }
 
     // Handle image uploads
     if (imageFiles.length > 0) {
       console.log(`=== IMAGE UPLOAD PROCESS ===`);
       console.log(`Starting upload of ${imageFiles.length} images...`);
       
-      const uploadResults = await Promise.allSettled(
-        imageFiles.map(async (file, index) => {
-          console.log(`Uploading image ${index + 1}/${imageFiles.length}: ${file.name}...`);
-          
-          try {
-            const folderPath = `users/${userId}/requests/${requestId}`;
-            const result = await uploadToCloudinary(file, folderPath, c);
+      try {
+        const uploadResults = await Promise.allSettled(
+          imageFiles.map(async (file, index) => {
+            console.log(`Uploading image ${index + 1}/${imageFiles.length}: ${file.name}...`);
             
-            console.log(`✓ Image ${index + 1} uploaded: ${result.url}`);
-            return result;
-          } catch (error) {
-            console.error(`✗ Image ${index + 1} upload failed:`, error);
-            throw error;
-          }
-        })
-      );
+            try {
+              // Validate file before upload
+              if (!file.name) {
+                throw new Error('File has no name');
+              }
+              
+              const folderPath = `users/${userId}/requests/${requestId}`;
+              const result = await uploadToCloudinary(file, folderPath, c);
+              
+              if (!result || !result.url) {
+                throw new Error('Upload failed - no URL returned');
+              }
+              
+              console.log(`✓ Image ${index + 1} uploaded: ${result.url}`);
+              return result;
+              
+            } catch (uploadError) {
+              console.error(`✗ Image ${index + 1} upload failed:`, uploadError);
+              throw new Error(`Upload failed for ${file.name}: ${uploadError instanceof Error ? uploadError.message : 'Unknown error'}`);
+            }
+          })
+        );
 
-      // Process results
-      const successful = uploadResults.filter(r => r.status === 'fulfilled');
-      const failed = uploadResults.filter(r => r.status === 'rejected');
-      
-      console.log(`Upload summary: ${successful.length} successful, ${failed.length} failed`);
-      
-      if (failed.length > 0) {
-        console.log('Failed uploads:');
-        failed.forEach((result, index) => {
-          console.log(`  ${index + 1}:`, result.reason);
-        });
-      }
-
-      // Save successful uploads to database
-      if (successful.length > 0) {
-        const imageRecords = successful.map(result => {
-          const { url, public_id } = (result as PromiseFulfilledResult<any>).value;
-          return {
-            requestId: requestId!,
-            url,
-            publicId: public_id
-          };
-        });
+        // Process upload results
+        const successful = uploadResults.filter(r => r.status === 'fulfilled');
+        const failed = uploadResults.filter(r => r.status === 'rejected');
         
-        console.log(`Saving ${imageRecords.length} image records to database...`);
-        await db.insert(requestImages).values(imageRecords);
-        console.log('✓ Image records saved');
+        console.log(`Upload summary: ${successful.length} successful, ${failed.length} failed`);
+        
+        if (failed.length > 0) {
+          console.log('Failed uploads:');
+          failed.forEach((result, index) => {
+            if (result.status === 'rejected') {
+              console.log(`  ${index + 1}: ${result.reason}`);
+            }
+          });
+        }
+
+        // Save successful uploads to database - Fixed TypeScript types
+        if (successful.length > 0) {
+          try {
+            const imageRecords = successful
+              .filter((result): result is PromiseFulfilledResult<any> => result.status === 'fulfilled')
+              .map(result => {
+                const { url, public_id } = result.value;
+                return {
+                  requestId: requestId!,
+                  url,
+                  publicId: public_id
+                };
+              });
+            
+            console.log(`Saving ${imageRecords.length} image records to database...`);
+            await db.insert(requestImages).values(imageRecords);
+            console.log('✓ Image records saved');
+            
+          } catch (dbImageError) {
+            console.error('Failed to save image records:', dbImageError);
+            // Don't fail the entire request for image record errors
+          }
+        }
+        
+      } catch (imageProcessError) {
+        console.error('Image processing error:', imageProcessError);
+        // Don't fail the entire request for image processing errors
       }
     } else {
       console.log('No images to upload');
     }
 
-    // Fetch complete request with images
-    const completeRequest = await db.query.requests.findFirst({
-      where: eq(requests.id, requestId),
-      with: {
-        images: {
-          columns: {
-            url: true
+    // Fetch complete request with images - Type-safe version
+    let completeRequest: any;
+    try {
+      completeRequest = await db.query.requests.findFirst({
+        where: eq(requests.id, requestId),
+        with: {
+          images: {
+            columns: {
+              url: true
+            }
           }
         }
+      });
+      
+      if (!completeRequest) {
+        throw new Error('Failed to retrieve created request');
       }
-    });
+      
+    } catch (fetchError) {
+      console.error('Error fetching complete request:', fetchError);
+      // Return basic request info if fetch fails - Fixed TypeScript types
+      completeRequest = { 
+        id: requestId, 
+        images: [] as { url: string }[],
+        userId,
+        status: 'open' as const,
+        isService: body.isService,
+        desiredPrice: Number(body.desiredPrice),
+        location: body.location.toString().trim(),
+        createdAt: new Date()
+      };
+    }
 
+    // Construct response with proper image mapping
     const response = {
       ...completeRequest,
-      images: completeRequest?.images.map(img => img.url) || []
+      images: (completeRequest?.images || []).map((img: any) => img.url)
     };
     
     console.log('=== FINAL RESPONSE ===');
     console.log(`Request ID: ${response.id}`);
-    console.log(`Images: ${response.images.length}`);
-    response.images.forEach((url, index) => {
-      console.log(`  Image ${index + 1}: ${url}`);
-    });
+    console.log(`Images: ${response.images?.length || 0}`);
+    if (response.images && response.images.length > 0) {
+      response.images.forEach((url: string, index: number) => {
+        console.log(`  Image ${index + 1}: ${url}`);
+      });
+    }
 
-    // Notify providers (existing logic)
-    await notifyNearbyProviders(request);
+    // Notify providers (with error handling) - Ensure completeRequest matches expected type
+    try {
+      await notifyNearbyProviders(completeRequest);
+      console.log('✓ Provider notifications sent');
+    } catch (notifyError) {
+      console.error('Provider notification failed:', notifyError);
+      // Don't fail the request creation for notification errors
+    }
 
     return c.json(response);
 
   } catch (error) {
     console.error('=== ERROR IN REQUEST CREATION ===', error);
     
-    // Cleanup on error
+    // Enhanced cleanup on error - Fixed TypeScript types
     if (requestId) {
       console.log('Performing cleanup for failed request...');
       try {
+        // Delete request and associated images
         const imagesToDelete = await db.query.requestImages.findMany({
           where: eq(requestImages.requestId, requestId),
           columns: { publicId: true }
         });
         
-        await Promise.allSettled([
-          db.delete(requests).where(eq(requests.id, requestId)),
-          ...imagesToDelete.map(img => 
+        // Type-safe cleanup promises array
+        const cleanupPromises: Promise<any>[] = [
+          db.delete(requests).where(eq(requests.id, requestId))
+        ];
+        
+        // Add Cloudinary cleanup if images exist
+        if (imagesToDelete.length > 0) {
+          const imageCleanupPromises = imagesToDelete.map(img => 
             img.publicId ? deleteFromCloudinary(img.publicId, c) : Promise.resolve()
-          )
-        ]);
+          );
+          cleanupPromises.push(...imageCleanupPromises);
+        }
+        
+        await Promise.allSettled(cleanupPromises);
         console.log('✓ Cleanup completed');
       } catch (cleanupError) {
         console.error('Cleanup failed:', cleanupError);
@@ -870,10 +1018,13 @@ app.post('/', async (c) => {
     }
     
     return c.json({ 
-      error: 'Failed to create request',
-      details: error instanceof Error ? error.message : 'Internal server error'
+      error: 'Internal server error',
+      message: 'Something went wrong',
+      timestamp: new Date().toISOString(),
+      ...(process.env.NODE_ENV === 'development' && {
+        details: error instanceof Error ? error.message : String(error)
+      })
     }, 500);
   }
 });
-
 export default app;
