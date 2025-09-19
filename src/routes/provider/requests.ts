@@ -614,7 +614,7 @@ app.post('/', async (c) => {
   
   const contentType = c.req.header('content-type') || '';
   
-  if (contentType.includes('multipart/form-data')) {
+ if (contentType.includes('multipart/form-data')) {
     // Handle FormData with images
     const formData = await c.req.formData();
     
@@ -622,7 +622,7 @@ app.post('/', async (c) => {
       productName: formData.get('productName')?.toString(),
       description: formData.get('description')?.toString(),
       desiredPrice: formData.get('desiredPrice')?.toString(),
-      isService: formData.get('isService') === 'true',
+      isService: formData.get('isService')?.toString() === 'true', // Ensure boolean conversion
       serviceId: formData.get('serviceId')?.toString(),
       location: formData.get('location')?.toString(),
       collegeFilterId: formData.get('collegeFilterId')?.toString()
@@ -630,8 +630,13 @@ app.post('/', async (c) => {
     
     imageFiles = formData.getAll('images') as File[];
   } else {
-    // Handle regular JSON
-    body = await c.req.json();
+    // Handle regular JSON - add error handling for malformed JSON
+    try {
+      body = await c.req.json();
+    } catch (error) {
+      console.error('JSON parsing error:', error);
+      return c.json({ error: 'Invalid JSON format' }, 400);
+    }
   }
 
   // Validate request
