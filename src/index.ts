@@ -526,9 +526,10 @@ const server = createServer(async (req, res) => {
 // Create WebSocket server on the same port
 const wss = new WebSocketServer({ server });
 
-// Fix for WebSocket type issues
+// Track active connections (userId -> ws)
+const connections = new Map<string, ExtendedWebSocket>();
+
 wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
-  // Cast to ExtendedWebSocket after connection is established
   const extendedWs = ws as ExtendedWebSocket;
   console.log('New WebSocket connection established');
   extendedWs.isAlive = true;
@@ -543,7 +544,9 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
       const message = rawMessage.toString();
       const data = JSON.parse(message);
 
-      // Handle authentication
+      /**
+       * AUTHENTICATION
+       */
       if (data.type === 'auth') {
         const secret = process.env.JWT_SECRET;
         if (!secret) {
@@ -559,7 +562,10 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
               role: payload.role
             };
             console.log(`User ${payload.id} authenticated via WebSocket`);
-            
+
+            // Track the connection
+            connections.set(payload.id.toString(), extendedWs);
+
             // Send unread notifications
             const unread = await db
               .select()
@@ -586,7 +592,9 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
         }
       }
 
-      // Handle marking notifications as read
+      /**
+       * MARK NOTIFICATION AS READ
+       */
       if (data.type === 'mark_as_read' && extendedWs.user) {
         const { notificationId } = data;
         try {
@@ -603,6 +611,66 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
         }
       }
 
+      /**
+       * SUBSCRIBE TO SERVICE REQUESTS
+       */
+      if (data.type === 'subscribe' && data.channel === 'service_requests') {
+        if (extendedWs.user) {
+          console.log(`User ${extendedWs.user.userId} subscribed to service requests`);
+          // You could track subscriptions in a Map if needed
+        }
+      }
+
+      /**
+       * HANDLE SERVICE REQUEST RESPONSES
+       */
+      if (data.type === 'service_request_response' && extendedWs.user) {
+        const { requestId, action, response } = data;
+
+        const request = await db.query.serviceRequests.findFirst({
+          where: eq(schema.serviceRequests.id, requestId),
+          with: { client: true }
+        });
+
+        if (request) {
+          notifyUser(request.clientId, {
+            type: 'service_request_response',
+            requestId,
+            action,
+            response,
+            providerId: extendedWs.user.userId
+          });
+        }
+      }
+
+      /**
+       * HANDLE SERVICE REQUEST MESSAGES
+       */
+      if (data.type === 'service_request_message' && extendedWs.user) {
+        const { requestId, message } = data;
+
+        const request = await db.query.serviceRequests.findFirst({
+          where: eq(schema.serviceRequests.id, requestId),
+          with: {
+            client: true,
+            provider: { with: { user: true } }
+          }
+        });
+
+        if (request) {
+          const recipientId = extendedWs.user.userId === request.clientId
+            ? request.provider.user.id
+            : request.clientId;
+
+          notifyUser(recipientId, {
+            type: 'service_request_message',
+            requestId,
+            message,
+            senderId: extendedWs.user.userId
+          });
+        }
+      }
+
     } catch (err) {
       console.error('WebSocket message error:', err);
     }
@@ -610,6 +678,9 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
 
   extendedWs.on('close', () => {
     console.log('WebSocket connection closed');
+    if (extendedWs.user) {
+      connections.delete(extendedWs.user.userId.toString());
+    }
   });
 
   extendedWs.on('error', (error: Error) => {
@@ -633,6 +704,46 @@ const interval = setInterval(() => {
 wss.on('close', () => {
   clearInterval(interval);
 });
+
+/**
+ * Helper to send messages to a specific user
+ */
+function notifyUser(userId: number, payload: any) {
+  const ws = connections.get(userId.toString());
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(payload));
+  }
+}
+
+/**
+ * Exported helpers for external usage
+ */
+export async function notifyNewServiceRequest(providerId: number, request: any) {
+  notifyUser(providerId, {
+    type: 'service_request_update',
+    data: request
+  });
+}
+
+export async function notifyServiceRequestUpdate(requestId: number, update: any) {
+  const request = await db.query.serviceRequests.findFirst({
+    where: eq(schema.serviceRequests.id, requestId),
+    with: {
+      client: true,
+      provider: { with: { user: true } }
+    }
+  });
+
+  if (request) {
+    [request.clientId, request.provider.user.id].forEach(userId => {
+      notifyUser(userId, {
+        type: 'service_request_update',
+        data: { ...request, ...update }
+      });
+    });
+  }
+}
+
 
 // Start the server
 server.listen(port, () => {

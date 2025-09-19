@@ -11,7 +11,7 @@ import {
   notifications,
   providerServices 
 } from '../../drizzle/schema.js';
-import { eq, and, desc, or } from 'drizzle-orm';
+import { eq, and, desc, or, count, gt } from 'drizzle-orm';
 import type { CustomContext } from '../../types/context.js';
 import { authMiddleware } from '../../middleware/bearAuth.js';
 
@@ -30,7 +30,6 @@ app.post('/', async (c) => {
     
     console.log('User making request:', { id: userId, role: user.role });
     
-    // Allow all authenticated users to make service requests
     if (!user || !user.id) {
       console.error('Authentication failed - no user');
       return c.json({ error: 'Authentication required' }, 401);
@@ -42,10 +41,7 @@ app.post('/', async (c) => {
       console.log('Request body received:', requestBody);
     } catch (jsonError) {
       console.error('Failed to parse JSON request body:', jsonError);
-      return c.json({ 
-        success: false,
-        error: 'Invalid JSON in request body' 
-      }, 400);
+      return c.json({ success: false, error: 'Invalid JSON in request body' }, 400);
     }
 
     const {
@@ -61,32 +57,20 @@ app.post('/', async (c) => {
       clientNotes
     } = requestBody;
 
-    console.log('Extracted fields:', { providerId, serviceId, requestTitle });
-
-    // Validate required fields
     if (!providerId || !serviceId || !requestTitle) {
       console.error('Missing required fields:', { providerId, serviceId, requestTitle });
-      return c.json({ 
-        success: false,
-        error: 'Provider, service, and title are required' 
-      }, 400);
+      return c.json({ success: false, error: 'Provider, service, and title are required' }, 400);
     }
 
-    // Convert to numbers and validate
     const providerIdNum = Number(providerId);
     const serviceIdNum = Number(serviceId);
     
     if (isNaN(providerIdNum) || isNaN(serviceIdNum)) {
       console.error('Invalid ID formats:', { providerId, serviceId });
-      return c.json({ 
-        success: false,
-        error: 'Invalid provider or service ID format' 
-      }, 400);
+      return c.json({ success: false, error: 'Invalid provider or service ID format' }, 400);
     }
 
-    console.log('Looking for providerService with:', { providerIdNum, serviceIdNum });
-
-    // Verify the provider exists and offers this service
+    // Verify provider + service
     let providerService;
     try {
       providerService = await db.query.providerServices.findFirst({
@@ -95,71 +79,24 @@ app.post('/', async (c) => {
           eq(providerServices.serviceId, serviceIdNum)
         ),
         with: {
-          provider: {
-            with: {
-              user: {
-                columns: { id: true, full_name: true }
-              }
-            }
-          },
-          service: {
-            columns: { id: true, name: true }
-          }
+          provider: { with: { user: { columns: { id: true, full_name: true } } } },
+          service: { columns: { id: true, name: true } }
         }
       });
-      
-      console.log('Provider service query result:', providerService);
     } catch (dbError) {
       console.error('Database error finding providerService:', dbError);
-      return c.json({ 
-        success: false,
-        error: 'Database error while checking provider service' 
-      }, 500);
+      return c.json({ success: false, error: 'Database error while checking provider service' }, 500);
     }
 
     if (!providerService) {
-      console.error('Provider service not found');
-      // Let's also check if provider exists at all
-      try {
-        const providerExists = await db.query.providers.findFirst({
-          where: eq(providers.id, providerIdNum),
-          with: {
-            user: {
-              columns: { id: true, full_name: true }
-            }
-          }
-        });
-        
-        console.log('Provider exists check:', providerExists);
-        
-        if (!providerExists) {
-          return c.json({ 
-            success: false,
-            error: 'Provider not found' 
-          }, 404);
-        }
-      } catch (err) {
-        console.error('Error checking provider existence:', err);
-      }
-      
-      return c.json({ 
-        success: false,
-        error: 'Provider does not offer this service' 
-      }, 400);
+      return c.json({ success: false, error: 'Provider does not offer this service' }, 400);
     }
 
-    // Prevent users from requesting their own services
     if (providerService.provider.user.id === userId) {
-      console.error('User trying to request own service');
-      return c.json({ 
-        success: false,
-        error: 'Cannot request your own service' 
-      }, 400);
+      return c.json({ success: false, error: 'Cannot request your own service' }, 400);
     }
 
-    console.log('Creating service request...');
-
-    // Create the service request with proper data types
+    // Create the service request
     let request;
     try {
       [request] = await db.insert(serviceRequests).values({
@@ -178,36 +115,23 @@ app.post('/', async (c) => {
         createdAt: new Date(),
         updatedAt: new Date()
       }).returning();
-      
-      console.log('Service request created:', request);
     } catch (insertError) {
       console.error('Database error creating service request:', insertError);
-      const errorMessage = insertError instanceof Error 
-    ? insertError.message 
-    : String(insertError);
-      return c.json({ 
-        success: false,
-        error: 'Failed to create service request in database',
-        details: errorMessage
-      }, 500);
+      return c.json({ success: false, error: 'Failed to create service request in database' }, 500);
     }
 
-    // Get client info for notification
+    // Fetch client info
     let client;
     try {
       client = await db.query.users.findFirst({
         where: eq(users.id, userId),
-        columns: { full_name: true, email: true }
+        columns: { full_name: true, email: true, avatar: true }
       });
-      
-      console.log('Client info:', client);
-    } catch (clientError) {
-      console.error('Error fetching client info:', clientError);
-      // Continue without notification rather than failing the whole request
-      client = { full_name: 'Unknown', email: null };
+    } catch {
+      client = { full_name: 'Unknown', email: null, avatar: null };
     }
 
-    // Create notification for provider
+    // DB notification
     try {
       await db.insert(notifications).values({
         userId: providerService.provider.user.id,
@@ -217,45 +141,36 @@ app.post('/', async (c) => {
         isRead: false,
         createdAt: new Date()
       });
-      
-      console.log('Notification created successfully');
     } catch (notificationError) {
       console.error('Error creating notification (non-fatal):', notificationError);
-      // Continue without failing - notification is nice-to-have
+    }
+
+    // 🔔 WebSocket notification
+    try {
+      const { notifyNewServiceRequest } = await import('../../index.js');
+      notifyNewServiceRequest(providerService.provider.user.id, {
+        ...request,
+        client: {
+          id: user.id,
+          full_name: user.name,
+          avatar: user.avatar
+        },
+        service: providerService.service
+      });
+      console.log('WebSocket notification sent');
+    } catch (wsError) {
+      console.error('WebSocket notification failed (non-fatal):', wsError);
     }
 
     console.log('=== SERVICE REQUEST CREATION SUCCESS ===');
-    
-    return c.json({
-      success: true,
-      data: request
-    }, 201);
+    return c.json({ success: true, data: request }, 201);
 
   } catch (error) {
-  console.error('=== SERVICE REQUEST CREATION ERROR ===');
-
-  if (error instanceof Error) {
-    console.error('Unexpected error:', error);
-    console.error('Error stack:', error.stack);
-
-    return c.json({ 
-      success: false,
-      error: 'Internal server error while creating service request',
-      details: process.env.NODE_ENV === 'development' ? error.message : 'Please try again later'
-    }, 500);
+    console.error('=== SERVICE REQUEST CREATION ERROR ===', error);
+    return c.json({ success: false, error: 'Internal server error while creating service request' }, 500);
   }
-
-  // fallback for non-Error values
-  console.error('Unexpected non-Error thrown:', error);
-
-  return c.json({ 
-    success: false,
-    error: 'Internal server error while creating service request',
-    details: 'Please try again later'
-  }, 500);
-}
-
 });
+
 
 // READ: Get service requests for current user - HANDLE ALL ROLES
 app.get('/', async (c) => {
@@ -722,6 +637,226 @@ app.post('/:id/complete', async (c) => {
   );
 }
 
+});
+
+// Add these routes to your existing backend services/serviceRequests.js
+
+// Get unread count
+app.get('/unread-count', async (c) => {
+  try {
+    const user = c.get('user');
+    const userId = Number(user.id);
+    
+    if (user.role !== 'service_provider') {
+      return c.json({ 
+        success: false,
+        error: 'Only service providers can access unread count' 
+      }, 403);
+    }
+
+    // Get provider profile
+    const provider = await db.query.providers.findFirst({
+      where: eq(providers.userId, userId),
+      columns: { id: true }
+    });
+
+    if (!provider) {
+      return c.json({ 
+        success: false,
+        error: 'Provider profile not found' 
+      }, 404);
+    }
+
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    
+    // Use a different variable name to avoid conflicts
+    const result = await db.select({ count: count() })
+      .from(serviceRequests)
+      .where(and(
+        eq(serviceRequests.providerId, provider.id),
+        eq(serviceRequests.status, 'pending'),
+        gt(serviceRequests.createdAt, twentyFourHoursAgo)
+      ));
+
+    return c.json({ 
+      success: true,
+      count: result[0]?.count || 0
+    });
+  } catch (error) {
+    console.error('Error fetching unread count:', error);
+    return c.json({ 
+      success: false,
+      error: 'Failed to fetch unread count' 
+    }, 500);
+  }
+});
+// Send quick message
+app.post('/:id/message', async (c) => {
+  try {
+    const requestId = Number(c.req.param('id'));
+    const user = c.get('user');
+    const userId = Number(user.id);
+    
+    let requestBody;
+    try {
+      requestBody = await c.req.json();
+    } catch (jsonError) {
+      return c.json({ 
+        success: false,
+        error: 'Invalid JSON in request body' 
+      }, 400);
+    }
+    
+    const { message } = requestBody;
+
+    if (!message || typeof message !== 'string' || message.trim().length === 0) {
+      return c.json({ 
+        success: false,
+        error: 'Message content is required' 
+      }, 400);
+    }
+
+    // Get the service request with its current chatRoom
+    const request = await db.query.serviceRequests.findFirst({
+      where: eq(serviceRequests.id, requestId),
+      with: {
+        client: true,
+        provider: {
+          with: {
+            user: true
+          }
+        },
+        chatRoom: true // Include the chat room if it exists
+      }
+    });
+
+    if (!request) {
+      return c.json({ 
+        success: false,
+        error: 'Service request not found' 
+      }, 404);
+    }
+
+    // Check if user is authorized (either client or provider)
+    const isClient = request.clientId === userId;
+    const isProvider = request.provider?.user?.id === userId;
+
+    if (!isClient && !isProvider) {
+      return c.json({ 
+        success: false,
+        error: 'Unauthorized access' 
+      }, 403);
+    }
+
+    let chatRoom;
+    
+    // If chat room already exists, use it
+    if (request.chatRoomId && request.chatRoom) {
+      chatRoom = request.chatRoom;
+    } else {
+      // Create new chat room
+      [chatRoom] = await db.insert(chatRooms).values({
+        clientId: request.clientId,
+        providerId: request.providerId,
+        // Note: We're NOT setting requestId here since this is for serviceRequests
+        // If you want to link to the original request, you could, but it's optional
+        status: 'active',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      }).returning();
+
+      // Update service request with the new chat room ID
+      await db.update(serviceRequests)
+        .set({ 
+          chatRoomId: chatRoom.id,
+          updatedAt: new Date() 
+        })
+        .where(eq(serviceRequests.id, requestId));
+    }
+
+    // Create message
+    await db.insert(messages).values({
+      chatRoomId: chatRoom.id,
+      senderId: userId,
+      content: message.trim(),
+      isSystem: false,
+      read: false,
+      createdAt: new Date()
+    });
+
+    // Update chat room timestamp
+    await db.update(chatRooms)
+      .set({ updatedAt: new Date() })
+      .where(eq(chatRooms.id, chatRoom.id));
+
+    // Create notification for the other party
+    const recipientId = isClient ? request.provider.user.id : request.clientId;
+    
+    await db.insert(notifications).values({
+      userId: recipientId,
+      type: 'new_message',
+      message: `New message about service request: ${request.requestTitle}`,
+      relatedEntityId: chatRoom.id,
+      isRead: false,
+      createdAt: new Date()
+    });
+
+    return c.json({
+      success: true,
+      message: 'Message sent successfully',
+      data: {
+        chatRoomId: chatRoom.id
+      }
+    });
+  } catch (error) {
+    console.error('Error sending message:', error);
+    return c.json({ 
+      success: false,
+      error: 'Failed to send message' 
+    }, 500);
+  }
+});
+
+// Notification preferences endpoint
+app.post('/notification-preferences', async (c) => {
+  try {
+    const user = c.get('user');
+    const userId = Number(user.id);
+    
+    let requestBody;
+    try {
+      requestBody = await c.req.json();
+    } catch (jsonError) {
+      return c.json({ 
+        success: false,
+        error: 'Invalid JSON in request body' 
+      }, 400);
+    }
+    
+    const { emailNotifications, browserNotifications, soundNotifications, smsNotifications } = requestBody;
+
+    // Save preferences to database (or localStorage for demo)
+    // In a real app, you would store this in the database
+    const preferences = {
+      emailNotifications: Boolean(emailNotifications),
+      browserNotifications: Boolean(browserNotifications),
+      soundNotifications: Boolean(soundNotifications),
+      smsNotifications: Boolean(smsNotifications)
+    };
+
+    // For demo purposes, we'll just return success
+    // In a real app, you would save to the database
+    return c.json({
+      success: true,
+      data: preferences
+    });
+  } catch (error) {
+    console.error('Error saving preferences:', error);
+    return c.json({ 
+      success: false,
+      error: 'Failed to save preferences' 
+    }, 500);
+  }
 });
 
 export default app;
