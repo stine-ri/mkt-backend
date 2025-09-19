@@ -91,7 +91,6 @@ product.post('/', async (c) => {
   const description = formData.get('description')?.toString().trim();
   const price = formData.get('price')?.toString();
   const category = formData.get('category')?.toString().trim();
-  const stock = formData.get('stock')?.toString().trim();
   const imageFiles = formData.getAll('images') as File[];
 
   if (!name || !description || !price || !category) {
@@ -132,15 +131,14 @@ product.post('/', async (c) => {
       categoryId = foundCategory?.id;
     }
 
-    // Step 1: Create the product record
+    // Step 1: Create the product record - Products are now immediately published
     const [product] = await db.insert(products).values({
       providerId,
       name,
       description,
       price: priceNum.toString(),
       categoryId,
-      stock: stock ? parseInt(stock) : null,
-      status: 'draft',
+      status: 'published', // Changed from 'draft' to 'published'
     }).returning();
 
     productId = product.id;
@@ -247,7 +245,8 @@ product.patch('/:id/status', async (c) => {
   const productId = parseInt(c.req.param('id'));
   const { status } = await c.req.json();
 
-  if (!['published', 'draft', 'archived'].includes(status)) {
+  // Removed 'draft' from valid statuses
+  if (!['published', 'archived'].includes(status)) {
     return c.json({ error: 'Invalid status' }, 400);
   }
 
