@@ -799,6 +799,9 @@ export type TSRequestsWithRelations = TSRequests & {
   serviceName?: string;
   created_at?: Date | null;
   
+  // Add images property
+  images?: string[];
+  
   // Relations
   service?: TSServices | null;
   college?: TSColleges | null;

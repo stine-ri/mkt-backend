@@ -49,6 +49,14 @@ type QueryResult = {
   allowBids: boolean | null;
   accepted_bid_id: number | null;
   createdAt: Date | null;
+  // Add images type
+  images?: Array<{
+    id: number;
+    requestId: number;
+    url: string;
+    publicId: string | null;
+    createdAt: Date | null;
+  }>;
   service?: {
     id: number;
     name: string;
@@ -127,176 +135,191 @@ app.get('/requests',  async (c) => {
 
   try {
     // Build the query with proper typing
-    const queryOptions = {
-      where: eq(requests.userId, userId),
-      orderBy: [desc(requests.createdAt)],
-      with: {
-        service: {
-          columns: {
-            id: true,
-            name: true,
-            category: true,
-            description: true,
-            createdAt: true // Include this required field
-          }
+  
+const queryOptions = {
+  where: eq(requests.userId, userId),
+  orderBy: [desc(requests.createdAt)],
+  with: {
+    // Add images relation
+    images: {
+      columns: {
+        id: true,
+        requestId: true,
+        url: true,
+        publicId: true,
+        createdAt: true
+      }
+    },
+    service: {
+      columns: {
+        id: true,
+        name: true,
+        category: true,
+        description: true,
+        createdAt: true
+      }
+    },
+    college: {
+      columns: {
+        id: true,
+        name: true,
+        location: true,
+        createdAt: true
+      }
+    },
+    bids: {
+      columns: {
+        id: true,
+        userId: true,
+        requestId: true,
+        providerId: true,
+        price: true,
+        message: true,
+        status: true,
+        isGraduateOfRequestedCollege: true,
+        createdAt: true
+      }
+    },
+    ...(includeParam.includes('interests') && {
+      interests: {
+        columns: {
+          id: true,
+          requestId: true,
+          providerId: true,
+          message: true,
+          status: true,
+          isShortlisted: true,
+          chatRoomId: true,
+          createdAt: true
         },
-        college: {
-          columns: {
-            id: true,
-            name: true,
-            location: true, // Include this required field
-            createdAt: true // Include this required field
-          }
-        },
-        bids: {
-          columns: {
-            id: true,
-            userId: true, // Include this required field
-            requestId: true,
-            providerId: true,
-            price: true,
-            message: true,
-            status: true,
-            isGraduateOfRequestedCollege: true, // Include this required field
-            createdAt: true
-          }
-        },
-        ...(includeParam.includes('interests') && {
-          interests: {
+        with: {
+          provider: {
             columns: {
               id: true,
-              requestId: true,
-              providerId: true,
-              message: true,
-              status: true,
-              isShortlisted: true,
-              chatRoomId: true,
-              createdAt: true
+              userId: true,
+              firstName: true,
+              lastName: true,
+              phoneNumber: true,
+              collegeId: true,
+              latitude: true,
+              longitude: true,
+              address: true,
+              bio: true,
+              isProfileComplete: true,
+              rating: true,
+              completedRequests: true,
+              profileImageUrl: true,
+              createdAt: true,
+              updatedAt: true
             },
             with: {
-              provider: {
+              user: {
                 columns: {
                   id: true,
-                  userId: true,
-                  firstName: true,
-                  lastName: true,
-                  phoneNumber: true,
-                  collegeId: true,
-                  latitude: true,
-                  longitude: true,
+                  full_name: true,
+                  email: true,
+                  contact_phone: true,
                   address: true,
-                  bio: true,
-                  isProfileComplete: true,
-                  rating: true,
-                  completedRequests: true,
-                  profileImageUrl: true,
-                  createdAt: true,
-                  updatedAt: true
-                },
-                with: {
-                  user: {
-                    columns: {
-                      id: true,
-                      full_name: true,
-                      email: true,
-                       contact_phone: true, 
-                       address: true,
-                      avatar: true,
-                      role: true,
-                      created_at: true,    // Added missing field
-                      updated_at: true 
-                    }
-                  }
+                  avatar: true,
+                  role: true,
+                  created_at: true,
+                  updated_at: true
                 }
               }
             }
           }
-        })
+        }
       }
-    };
+    })
+  }
+};
 
     const rawRequests = await db.query.requests.findMany(queryOptions) as QueryResult[];
 
     // Type the response with proper typing
     const formatted: TSRequestsWithRelations[] = rawRequests.map((r) => {
-      // Extended properties with relations
-      const extendedRequest: TSRequestsWithRelations = {
-        // Base request properties
-        id: r.id,
-        userId: r.userId,
-        description: r.description,
-        createdAt: r.createdAt,
-        serviceId: r.serviceId,
-        productName: r.productName,
-        isService: r.isService,
-        desiredPrice: r.desiredPrice,
-        location: r.location,
-        collegeFilterId: r.collegeFilterId,
-          status: r.status as "open" | "closed" | "pending" | null,
-        allowInterests: r.allowInterests,
-        allowBids: r.allowBids,
-        accepted_bid_id: r.accepted_bid_id,
-        
-        // Add computed fields - these are safe to add
-        budget: r.desiredPrice,
-        title: r.productName || (r.service?.name ?? '') || '',
-        category: r.service?.category || '',
-        serviceName: r.service?.name || '',
-        created_at: r.createdAt,
-        
-        // Add relations - directly assign since we know the structure
-        service: r.service || null,
-        college: r.college || null,
-          bids: (r.bids || []).map(bid => ({
-          ...bid,
-          status: bid.status as "pending" | "accepted" | "rejected" | null
-        })),
-        interests: (r.interests || []).map(i => ({
-          id: i.id,
-          requestId: i.requestId,
-          providerId: i.providerId,
-          message: i.message,
-          status: i.status,
-          chatRoomId: i.chatRoomId ?? null,
-          isShortlisted: i.isShortlisted,
-          createdAt: i.createdAt,
+  const extendedRequest: TSRequestsWithRelations = {
+    // Base request properties
+    id: r.id,
+    userId: r.userId,
+    description: r.description,
+    createdAt: r.createdAt,
+    serviceId: r.serviceId,
+    productName: r.productName,
+    isService: r.isService,
+    desiredPrice: r.desiredPrice,
+    location: r.location,
+    collegeFilterId: r.collegeFilterId,
+    status: r.status as "open" | "closed" | "pending" | null,
+    allowInterests: r.allowInterests,
+    allowBids: r.allowBids,
+    accepted_bid_id: r.accepted_bid_id,
+    
+    // Add computed fields
+    budget: r.desiredPrice,
+    title: r.productName || (r.service?.name ?? '') || '',
+    category: r.service?.category || '',
+    serviceName: r.service?.name || '',
+    created_at: r.createdAt,
+    
+// Add images with proper URL normalization and null filtering
+images: (r.images || [])
+  .map(img => normalizeUrl(img.url))
+  .filter((url): url is string => url !== null),
+    
+    // Add relations
+    service: r.service || null,
+    college: r.college || null,
+    bids: (r.bids || []).map(bid => ({
+      ...bid,
+      status: bid.status as "pending" | "accepted" | "rejected" | null
+    })),
+    interests: (r.interests || []).map(i => ({
+      id: i.id,
+      requestId: i.requestId,
+      providerId: i.providerId,
+      message: i.message,
+      status: i.status,
+      chatRoomId: i.chatRoomId ?? null,
+      isShortlisted: i.isShortlisted,
+      createdAt: i.createdAt,
       provider: i.provider ? {
-  id: i.provider.id,
-  userId: i.provider.userId,
-  firstName: i.provider.firstName,
-  lastName: i.provider.lastName,
-  phoneNumber: i.provider.phoneNumber,
-  collegeId: i.provider.collegeId,
-  latitude: i.provider.latitude,
-  longitude: i.provider.longitude,
-  address: i.provider.address,
-  bio: i.provider.bio,
-  isProfileComplete: i.provider.isProfileComplete,
-  rating: i.provider.rating,
-  completedRequests: i.provider.completedRequests,
-  profileImageUrl: normalizeUrl(i.provider.profileImageUrl),
-  createdAt: i.provider.createdAt,
-  updatedAt: i.provider.updatedAt,
-   status: 'some-default-status',
-  user: i.provider.user ? {
-    id: i.provider.user.id,
-    full_name: i.provider.user.full_name,
-    email: i.provider.user.email,
-    contact_phone: i.provider.user.contact_phone,
-    address: i.provider.user.address,
-    avatar: normalizeUrl(i.provider.user.avatar),
-    role: ['admin', 'service_provider', 'client'].includes(i.provider.user.role)
-      ? i.provider.user.role as "admin" | "service_provider" | "client"
-      : 'client',
-    created_at: i.provider.user.created_at,
-    updated_at: i.provider.user.updated_at
-  } : null
-} : null
-        }))
-      };
+        id: i.provider.id,
+        userId: i.provider.userId,
+        firstName: i.provider.firstName,
+        lastName: i.provider.lastName,
+        phoneNumber: i.provider.phoneNumber,
+        collegeId: i.provider.collegeId,
+        latitude: i.provider.latitude,
+        longitude: i.provider.longitude,
+        address: i.provider.address,
+        bio: i.provider.bio,
+        isProfileComplete: i.provider.isProfileComplete,
+        rating: i.provider.rating,
+        completedRequests: i.provider.completedRequests,
+        profileImageUrl: normalizeUrl(i.provider.profileImageUrl),
+        createdAt: i.provider.createdAt,
+        updatedAt: i.provider.updatedAt,
+        status: 'some-default-status',
+        user: i.provider.user ? {
+          id: i.provider.user.id,
+          full_name: i.provider.user.full_name,
+          email: i.provider.user.email,
+          contact_phone: i.provider.user.contact_phone,
+          address: i.provider.user.address,
+          avatar: normalizeUrl(i.provider.user.avatar),
+          role: ['admin', 'service_provider', 'client'].includes(i.provider.user.role)
+            ? i.provider.user.role as "admin" | "service_provider" | "client"
+            : 'client',
+          created_at: i.provider.user.created_at,
+          updated_at: i.provider.user.updated_at
+        } : null
+      } : null
+    }))
+  };
 
-      return extendedRequest;
-    });
+  return extendedRequest;
+});
 
     return c.json(formatted);
   } catch (error) {

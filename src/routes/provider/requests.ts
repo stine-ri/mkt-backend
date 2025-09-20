@@ -560,7 +560,7 @@ function formatResponseData(rows: any[]) {
 
 ///interests
 
-app.get('/my', async (c) => {
+app.get('/', async (c) => {
   try {
     const user = c.get('user');
     const includeParam = c.req.query('include') || '';
