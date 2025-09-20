@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import { eq, and, sql, desc } from 'drizzle-orm';
 import { InferSelectModel } from 'drizzle-orm';
 import { db } from '../../drizzle/db.js';
-import { TSRequestsWithRelations, TSRequests,TSInterests, TSProviders } from '../../drizzle/schema.js';
+import { TSRequestsWithRelations, TSRequests,TSInterests, TSProviders ,requestImages} from '../../drizzle/schema.js';
 import { drizzle } from 'drizzle-orm/node-postgres';
 
 import {
@@ -16,6 +16,7 @@ import {
 
 import { authMiddleware, clientRoleAuth } from '../../middleware/bearAuth.js';
 import { normalizeUrl } from '../../utils/normalizeUrl.js'; 
+import { uploadToCloudinary, deleteFromCloudinary } from '../../utils/cloudinary.js';
 
 const app = new Hono()
   .use('*', authMiddleware)
@@ -539,14 +540,16 @@ app.post('/requests', async (c) => {
   const userId = Number(c.get('user').id);
   
   let body: any;
+  let imageFiles: File[] = [];
   const contentType = c.req.header('content-type') || '';
   
   try {
     // Check if it's multipart/form-data or JSON
     if (contentType.toLowerCase().includes('multipart/form-data')) {
-      // Handle FormData
+      // Handle FormData with images
       const formData = await c.req.formData();
       
+      // Extract form fields
       body = {
         productName: formData.get('productName')?.toString() || null,
         description: formData.get('description')?.toString() || null,
@@ -556,6 +559,16 @@ app.post('/requests', async (c) => {
         location: formData.get('location')?.toString() || null,
         collegeFilterId: formData.get('collegeFilterId')?.toString() || null
       };
+      
+      // Extract images
+      const rawImageFiles = formData.getAll('images');
+      imageFiles = rawImageFiles.filter((file): file is File => 
+        file instanceof File && 
+        file.size > 0 && 
+        file.size <= 5 * 1024 * 1024 && 
+        file.type.startsWith('image/')
+      );
+      
     } else {
       // Handle JSON
       body = await c.req.json();
@@ -568,6 +581,7 @@ app.post('/requests', async (c) => {
     }, 400);
   }
 
+  // Validation
   if (body.isService && !body.serviceId) {
     return c.json({ error: 'Service ID is required' }, 400);
   }
@@ -576,19 +590,134 @@ app.post('/requests', async (c) => {
     return c.json({ error: 'Product name is required' }, 400);
   }
 
-  const [request] = await db.insert(requests).values({
-    userId,
-    serviceId: body.isService ? Number(body.serviceId) : null,
-    productName: !body.isService ? body.productName : null,
-    isService: Boolean(body.isService),
-    description: body.description,
-    desiredPrice: Number(body.desiredPrice),
-    location: body.location,
-    collegeFilterId: body.collegeFilterId ? Number(body.collegeFilterId) : null,
-    status: 'open',
-  }).returning();
+  if (!body.desiredPrice || isNaN(Number(body.desiredPrice)) || Number(body.desiredPrice) < 0) {
+    return c.json({ error: 'Valid desired price is required' }, 400);
+  }
 
-  return c.json(request);
+  if (!body.location || typeof body.location !== 'string' || body.location.trim() === '') {
+    return c.json({ error: 'Location is required' }, 400);
+  }
+
+  let requestId: number | null = null;
+  
+  try {
+    // Create the request in database
+    const [request] = await db.insert(requests).values({
+      userId,
+      serviceId: body.isService ? Number(body.serviceId) : null,
+      productName: !body.isService ? body.productName : null,
+      isService: Boolean(body.isService),
+      description: body.description,
+      desiredPrice: Number(body.desiredPrice),
+      location: body.location,
+      collegeFilterId: body.collegeFilterId ? Number(body.collegeFilterId) : null,
+      status: 'open',
+    }).returning();
+
+    if (!request || !request.id) {
+      throw new Error('Database insert failed');
+    }
+
+    requestId = request.id;
+
+    // Handle image uploads to Cloudinary
+    if (imageFiles.length > 0) {
+      const uploadResults = await Promise.allSettled(
+        imageFiles.map(async (file) => {
+          try {
+            const folderPath = `users/${userId}/requests/${requestId}`;
+            const result = await uploadToCloudinary(file, folderPath, c);
+            
+            if (!result || !result.url) {
+              throw new Error('Upload failed - no URL returned');
+            }
+            
+            return result;
+          } catch (uploadError) {
+            console.error('Image upload failed:', uploadError);
+            throw new Error(`Upload failed for ${file.name}: ${uploadError instanceof Error ? uploadError.message : 'Unknown error'}`);
+          }
+        })
+      );
+
+      // Save successful uploads to database
+      const successfulUploads = uploadResults
+        .filter((result): result is PromiseFulfilledResult<any> => result.status === 'fulfilled')
+        .map(result => result.value);
+
+      if (successfulUploads.length > 0) {
+        const imageRecords = successfulUploads.map(result => ({
+          requestId: requestId!,
+          url: result.url,
+          publicId: result.public_id
+        }));
+
+        await db.insert(requestImages).values(imageRecords);
+      }
+    }
+
+    // Fetch the complete request with images
+    const completeRequest = await db.query.requests.findFirst({
+      where: eq(requests.id, requestId),
+      with: {
+        images: {
+          columns: {
+            url: true
+          }
+        },
+        service: {
+          columns: {
+            name: true,
+            category: true
+          }
+        }
+      }
+    });
+
+    // Construct response with proper image URLs
+    const baseURL = process.env.API_BASE_URL || 'https://mkt-backend-sz2s.onrender.com';
+    const response = {
+      ...completeRequest,
+      images: (completeRequest?.images || []).map((img: any) => {
+        // Ensure absolute URLs
+        if (img.url && !img.url.startsWith('http')) {
+          return `${baseURL}${img.url.startsWith('/') ? '' : '/'}${img.url}`;
+        }
+        return img.url;
+      }).filter(Boolean)
+    };
+
+    return c.json(response);
+
+  } catch (error) {
+    console.error('Error creating request:', error);
+    
+    // Cleanup on error
+    if (requestId) {
+      try {
+        // Delete any uploaded images from Cloudinary
+        const imagesToDelete = await db.query.requestImages.findMany({
+          where: eq(requestImages.requestId, requestId),
+          columns: { publicId: true }
+        });
+        
+        await Promise.allSettled([
+          db.delete(requests).where(eq(requests.id, requestId)),
+          ...imagesToDelete.map(img => 
+            img.publicId ? deleteFromCloudinary(img.publicId, c) : Promise.resolve()
+          )
+        ]);
+      } catch (cleanupError) {
+        console.error('Cleanup failed:', cleanupError);
+      }
+    }
+    
+    return c.json({ 
+      error: 'Internal server error',
+      message: 'Failed to create request',
+      timestamp: new Date().toISOString()
+    }, 500);
+  }
 });
 
 export default app;
