@@ -560,7 +560,7 @@ function formatResponseData(rows: any[]) {
 
 ///interests
 
-app.get('/', async (c) => {
+app.get('/my', async (c) => {
   try {
     const user = c.get('user');
     const includeParam = c.req.query('include') || '';
@@ -604,6 +604,7 @@ app.get('/', async (c) => {
     }, 500);
   }
 });
+
 //  Enhanced FormData processing with better debugging
 
 // Complete TypeScript-fixed backend route
