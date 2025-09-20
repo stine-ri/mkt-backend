@@ -1,0 +1,1 @@
+ALTER TABLE "requests" ALTER COLUMN "desired_price" SET DATA TYPE numeric(10, 2);
