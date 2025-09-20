@@ -514,7 +514,36 @@ app.patch('/notifications/:id/read', async (c) => {
 
 app.post('/requests', async (c) => {
   const userId = Number(c.get('user').id);
-  const body = await c.req.json();
+  
+  let body: any;
+  const contentType = c.req.header('content-type') || '';
+  
+  try {
+    // Check if it's multipart/form-data or JSON
+    if (contentType.toLowerCase().includes('multipart/form-data')) {
+      // Handle FormData
+      const formData = await c.req.formData();
+      
+      body = {
+        productName: formData.get('productName')?.toString() || null,
+        description: formData.get('description')?.toString() || null,
+        desiredPrice: formData.get('desiredPrice')?.toString() || null,
+        isService: formData.get('isService')?.toString() === 'true',
+        serviceId: formData.get('serviceId')?.toString() || null,
+        location: formData.get('location')?.toString() || null,
+        collegeFilterId: formData.get('collegeFilterId')?.toString() || null
+      };
+    } else {
+      // Handle JSON
+      body = await c.req.json();
+    }
+  } catch (error) {
+    console.error('Error parsing request body:', error);
+    return c.json({ 
+      error: 'Invalid request format',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, 400);
+  }
 
   if (body.isService && !body.serviceId) {
     return c.json({ error: 'Service ID is required' }, 400);
