@@ -15,21 +15,30 @@ serviceRoutes.get('/services', async (c) => {
     console.log('Search:', search);
     console.log('Category:', category);
     
-    // Build base query for all services with provider counts
-    const servicesWithCounts = await db
-      .select({
-        id: services.id,
-        name: services.name,
-        description: services.description,
-        category: services.category,
-       
-        createdAt: services.createdAt,
-        providerCount: sql<number>`cast(count(distinct ${providerServices.providerId}) as integer)`
-      })
+    // First, get all services
+    const allServices = await db
+      .select()
       .from(services)
-      .leftJoin(providerServices, eq(services.id, providerServices.serviceId))
-      .groupBy(services.id, services.name, services.description, services.category, services.createdAt)
       .orderBy(services.createdAt);
+
+    // Then, for each service, count its providers
+    const servicesWithCounts = await Promise.all(
+      allServices.map(async (service) => {
+        const providerCount = await db
+          .select({ count: sql<number>`count(*)` })
+          .from(providerServices)
+          .where(eq(providerServices.serviceId, service.id));
+        
+        return {
+          id: service.id,
+          name: service.name,
+          description: service.description,
+          category: service.category,
+          createdAt: service.createdAt,
+          providerCount: Number(providerCount[0]?.count || 0)
+        };
+      })
+    );
 
     let result = servicesWithCounts;
 
@@ -52,6 +61,7 @@ serviceRoutes.get('/services', async (c) => {
     }
 
     console.log('✅ Service types found:', result.length);
+    console.log('Sample service with count:', result[0]);
     
     return c.json(result);
     
