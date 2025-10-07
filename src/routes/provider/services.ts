@@ -44,8 +44,13 @@ serviceRoutes.get('/services', async (c) => {
         
         console.log(`Service "${service.name}" has ${providerCount} providers`);
         
+        // ✅ FIX: Explicitly construct the object instead of using spread
         return {
-          ...service,
+          id: service.id,
+          name: service.name,
+          description: service.description,
+          category: service.category,
+          createdAt: service.createdAt,
           providerCount: providerCount
         };
       })
@@ -72,7 +77,7 @@ serviceRoutes.get('/services', async (c) => {
     }
 
     console.log('✅ Service types with provider counts:', result.length);
-    console.log('📊 Sample data:', result.slice(0, 2));
+    console.log('📊 Sample data with providerCount:', JSON.stringify(result.slice(0, 2), null, 2));
     
     return c.json(result);
     
