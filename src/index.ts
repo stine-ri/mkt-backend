@@ -235,7 +235,7 @@ app.route('/api/provider/requests', providerRequests);
 app.route('/api/provider/bids', providerBids);
 app.route('/api/colleges', collegesRoute);
 app.route('/api/client', clientRoutes);  
-app.route('/api', serviceRoutes);
+app.route('/api/all', serviceRoutes);
 app.route('/', profileUploadHandler);
 app.route('/api/interests', interestRoutes);
 app.route('/api/chat', chat);
