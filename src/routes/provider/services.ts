@@ -32,6 +32,8 @@ serviceRoutes.get('/services', async (c) => {
     // Then, for each service, count its providers
     const servicesWithCounts = await Promise.all(
       allServices.map(async (service) => {
+        console.log(`\n🔍 Processing service ID ${service.id}: "${service.name}"`);
+        
         // Count providers linked to this service
         const providerCountResult = await db
           .select({
@@ -40,12 +42,15 @@ serviceRoutes.get('/services', async (c) => {
           .from(providerServices)
           .where(eq(providerServices.serviceId, service.id));
         
+        console.log(`   Raw query result:`, providerCountResult);
+        console.log(`   Provider IDs found:`, providerCountResult.map(p => p.providerId));
+        
         const providerCount = providerCountResult.length;
         
-        console.log(`Service "${service.name}" has ${providerCount} providers`);
+        console.log(`   ✅ Final count for "${service.name}": ${providerCount} providers`);
         
-        // ✅ FIX: Explicitly construct the object instead of using spread
-        return {
+        // Explicitly construct the object
+        const result = {
           id: service.id,
           name: service.name,
           description: service.description,
@@ -53,6 +58,10 @@ serviceRoutes.get('/services', async (c) => {
           createdAt: service.createdAt,
           providerCount: providerCount
         };
+        
+        console.log(`   📦 Returned object:`, JSON.stringify(result));
+        
+        return result;
       })
     );
 
@@ -76,8 +85,8 @@ serviceRoutes.get('/services', async (c) => {
       });
     }
 
-    console.log('✅ Service types with provider counts:', result.length);
-    console.log('📊 Sample data with providerCount:', JSON.stringify(result.slice(0, 2), null, 2));
+    console.log('\n✅ FINAL RESULT - Service types with provider counts:', result.length);
+    console.log('📊 Sample data:', JSON.stringify(result.slice(0, 3), null, 2));
     
     return c.json(result);
     
