@@ -17,25 +17,36 @@ serviceRoutes.get('/services', async (c) => {
     
     // First, get all services
     const allServices = await db
-      .select()
+      .select({
+        id: services.id,
+        name: services.name,
+        description: services.description,
+        category: services.category,
+        createdAt: services.createdAt
+      })
       .from(services)
       .orderBy(services.createdAt);
+
+    console.log('📋 Total services found:', allServices.length);
 
     // Then, for each service, count its providers
     const servicesWithCounts = await Promise.all(
       allServices.map(async (service) => {
-        const providerCount = await db
-          .select({ count: sql<number>`count(*)` })
+        // Count providers linked to this service
+        const providerCountResult = await db
+          .select({
+            providerId: providerServices.providerId
+          })
           .from(providerServices)
           .where(eq(providerServices.serviceId, service.id));
         
+        const providerCount = providerCountResult.length;
+        
+        console.log(`Service "${service.name}" has ${providerCount} providers`);
+        
         return {
-          id: service.id,
-          name: service.name,
-          description: service.description,
-          category: service.category,
-          createdAt: service.createdAt,
-          providerCount: Number(providerCount[0]?.count || 0)
+          ...service,
+          providerCount: providerCount
         };
       })
     );
@@ -60,8 +71,8 @@ serviceRoutes.get('/services', async (c) => {
       });
     }
 
-    console.log('✅ Service types found:', result.length);
-    console.log('Sample service with count:', result[0]);
+    console.log('✅ Service types with provider counts:', result.length);
+    console.log('📊 Sample data:', result.slice(0, 2));
     
     return c.json(result);
     
@@ -156,6 +167,39 @@ serviceRoutes.get('/services/categories', async (c) => {
   } catch (error) {
     console.error('Error fetching service categories:', error);
     return c.json({ error: 'Failed to fetch categories' }, 500);
+  }
+});
+
+// Debug endpoint to check database state
+serviceRoutes.get('/services/debug', async (c) => {
+  try {
+    // Get all services
+    const allServices = await db.select().from(services);
+    
+    // Get all provider-service links
+    const allProviderServices = await db.select().from(providerServices);
+    
+    // Get all providers
+    const allProviders = await db.select().from(providers);
+    
+    console.log('🔍 DEBUG INFO:');
+    console.log('Total services:', allServices.length);
+    console.log('Total providerServices entries:', allProviderServices.length);
+    console.log('Total providers:', allProviders.length);
+    
+    return c.json({
+      summary: {
+        totalServices: allServices.length,
+        totalProviderServices: allProviderServices.length,
+        totalProviders: allProviders.length
+      },
+      services: allServices.slice(0, 3),
+      providerServices: allProviderServices.slice(0, 10),
+      providers: allProviders.slice(0, 3)
+    });
+  } catch (error) {
+    console.error('Debug error:', error);
+    return c.json({ error: 'Debug failed' }, 500);
   }
 });
 
