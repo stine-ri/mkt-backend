@@ -19,6 +19,7 @@ export const authMiddleware = async (c: Context<CustomContext>, next: Next) => {
     '/public/',  
     '/api/services',
     '/api/colleges',
+    '/api/all/services',
     '/api/login',
     '/uploads',
     '/uploads/',
