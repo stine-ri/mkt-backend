@@ -22,9 +22,9 @@ serviceRoutes.get('/services', async (c) => {
         name: services.name,
         description: services.description,
         category: services.category,
-
+       
         createdAt: services.createdAt,
-        providerCount: count(providerServices.providerId)
+        providerCount: sql<number>`cast(count(distinct ${providerServices.providerId}) as integer)`
       })
       .from(services)
       .leftJoin(providerServices, eq(services.id, providerServices.serviceId))
