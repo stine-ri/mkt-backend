@@ -5,65 +5,127 @@ import { ilike, or, eq, count, sql } from 'drizzle-orm';
 
 const serviceRoutes = new Hono();
 
+// IMPORTANT: Specific routes MUST come BEFORE parameterized routes!
+// Otherwise '/services/categories' will match '/services/:id' with id='categories'
+
+// Debug endpoint - Check database state
+serviceRoutes.get('/services/debug', async (c) => {
+  try {
+    console.log('🔍 DEBUG ENDPOINT CALLED');
+    
+    // Get all services
+    const allServices = await db.select().from(services);
+    
+    // Get all provider-service links
+    const allProviderServices = await db.select().from(providerServices);
+    
+    // Get all providers
+    const allProviders = await db.select().from(providers);
+    
+    console.log('📊 DEBUG INFO:');
+    console.log('Total services:', allServices.length);
+    console.log('Total providerServices entries:', allProviderServices.length);
+    console.log('Total providers:', allProviders.length);
+    
+    // Count providers per service
+    const providerCountByService: Record<number, number> = {};
+    allProviderServices.forEach(ps => {
+      if (!providerCountByService[ps.serviceId]) {
+        providerCountByService[ps.serviceId] = 0;
+      }
+      providerCountByService[ps.serviceId]++;
+    });
+    
+    console.log('Provider count by service ID:', providerCountByService);
+    
+    return c.json({
+      summary: {
+        totalServices: allServices.length,
+        totalProviderServices: allProviderServices.length,
+        totalProviders: allProviders.length
+      },
+      providerCountByService,
+      services: allServices.map(s => ({
+        id: s.id,
+        name: s.name,
+        category: s.category,
+        providerCount: providerCountByService[s.id] || 0
+      })),
+      providerServices: allProviderServices.slice(0, 20),
+      providers: allProviders.slice(0, 3)
+    });
+} catch (error) {
+  console.error('Debug error:', error);
+  
+  if (error instanceof Error) {
+    return c.json({ error: 'Debug failed', details: error.message }, 500);
+  }
+
+  // Fallback for non-Error values
+  return c.json({ error: 'Debug failed', details: String(error) }, 500);
+}
+
+});
+
+// Get service categories with counts
+serviceRoutes.get('/services/categories', async (c) => {
+  try {
+    const allServices = await db.select().from(services);
+    
+    const categoryMap = new Map();
+    allServices.forEach(service => {
+      if (service.category) {
+        const cat = service.category.trim();
+        categoryMap.set(cat, (categoryMap.get(cat) || 0) + 1);
+      }
+    });
+    
+    const categories = Array.from(categoryMap.entries()).map(([name, count], index) => ({
+      id: index + 1,
+      name,
+      count
+    }));
+    
+    return c.json(categories);
+  } catch (error) {
+    console.error('Error fetching service categories:', error);
+    return c.json({ error: 'Failed to fetch categories' }, 500);
+  }
+});
+
 // Get all service types (grouped services with provider counts)
+// OPTIMIZED VERSION - Single query with JOIN and GROUP BY
 serviceRoutes.get('/services', async (c) => {
   try {
     const search = c.req.query('q');
     const category = c.req.query('category');
     
-    console.log('=== FETCHING SERVICE TYPES ===');
+    console.log('=== FETCHING SERVICE TYPES (OPTIMIZED) ===');
     console.log('Search:', search);
     console.log('Category:', category);
     
-    // First, get all services
-    const allServices = await db
+    // OPTIMIZED: Single query with LEFT JOIN and COUNT
+    const servicesWithCounts = await db
       .select({
         id: services.id,
         name: services.name,
         description: services.description,
         category: services.category,
-        createdAt: services.createdAt
+        createdAt: services.createdAt,
+        // Count distinct provider IDs for each service
+        providerCount: sql<number>`CAST(COUNT(DISTINCT ${providerServices.providerId}) AS INTEGER)`
       })
       .from(services)
+      .leftJoin(providerServices, eq(services.id, providerServices.serviceId))
+      .groupBy(services.id, services.name, services.description, services.category, services.createdAt)
       .orderBy(services.createdAt);
 
-    console.log('📋 Total services found:', allServices.length);
-
-    // Then, for each service, count its providers
-    const servicesWithCounts = await Promise.all(
-      allServices.map(async (service) => {
-        console.log(`\n🔍 Processing service ID ${service.id}: "${service.name}"`);
-        
-        // Count providers linked to this service
-        const providerCountResult = await db
-          .select({
-            providerId: providerServices.providerId
-          })
-          .from(providerServices)
-          .where(eq(providerServices.serviceId, service.id));
-        
-        console.log(`   Raw query result:`, providerCountResult);
-        console.log(`   Provider IDs found:`, providerCountResult.map(p => p.providerId));
-        
-        const providerCount = providerCountResult.length;
-        
-        console.log(`   ✅ Final count for "${service.name}": ${providerCount} providers`);
-        
-        // Explicitly construct the object
-        const result = {
-          id: service.id,
-          name: service.name,
-          description: service.description,
-          category: service.category,
-          createdAt: service.createdAt,
-          providerCount: providerCount
-        };
-        
-        console.log(`   📦 Returned object:`, JSON.stringify(result));
-        
-        return result;
-      })
-    );
+    console.log('📋 Total services found:', servicesWithCounts.length);
+    
+    // Log each service with its provider count
+    servicesWithCounts.forEach(service => {
+      console.log(`   • ${service.name} (ID: ${service.id}): ${service.providerCount} providers`);
+    });
 
     let result = servicesWithCounts;
 
@@ -71,6 +133,7 @@ serviceRoutes.get('/services', async (c) => {
     if (category && category.trim() !== '' && category !== 'all') {
       const categoryTerm = category.trim().toLowerCase();
       result = result.filter(s => s.category?.toLowerCase().includes(categoryTerm));
+      console.log(`📂 Filtered by category "${category}": ${result.length} services`);
     }
 
     // Apply search filter if provided
@@ -83,6 +146,7 @@ serviceRoutes.get('/services', async (c) => {
         
         return nameMatch || categoryMatch || descriptionMatch;
       });
+      console.log(`🔎 Filtered by search "${search}": ${result.length} services`);
     }
 
     console.log('\n✅ FINAL RESULT - Service types with provider counts:', result.length);
@@ -90,10 +154,19 @@ serviceRoutes.get('/services', async (c) => {
     
     return c.json(result);
     
-  } catch (err) {
-    console.error('❌ Services error:', err);
-    return c.json({ error: 'Failed to fetch services' }, 500);
+ } catch (err) {
+  console.error('❌ Services error:', err);
+
+  if (err instanceof Error) {
+    console.error('Error details:', err.message);
+    console.error('Stack:', err.stack);
+    return c.json({ error: 'Failed to fetch services', details: err.message }, 500);
   }
+
+  // Fallback if it's not an Error object (e.g. a string or object)
+  return c.json({ error: 'Failed to fetch services', details: String(err) }, 500);
+}
+
 });
 
 // Get single service type with all providers
@@ -155,65 +228,6 @@ serviceRoutes.get('/services/:id', async (c) => {
   } catch (err) {
     console.error('❌ Service details error:', err);
     return c.json({ error: 'Failed to fetch service details' }, 500);
-  }
-});
-
-// Get service categories with counts
-serviceRoutes.get('/services/categories', async (c) => {
-  try {
-    const allServices = await db.select().from(services);
-    
-    const categoryMap = new Map();
-    allServices.forEach(service => {
-      if (service.category) {
-        const cat = service.category.trim();
-        categoryMap.set(cat, (categoryMap.get(cat) || 0) + 1);
-      }
-    });
-    
-    const categories = Array.from(categoryMap.entries()).map(([name, count], index) => ({
-      id: index + 1,
-      name,
-      count
-    }));
-    
-    return c.json(categories);
-  } catch (error) {
-    console.error('Error fetching service categories:', error);
-    return c.json({ error: 'Failed to fetch categories' }, 500);
-  }
-});
-
-// Debug endpoint to check database state
-serviceRoutes.get('/services/debug', async (c) => {
-  try {
-    // Get all services
-    const allServices = await db.select().from(services);
-    
-    // Get all provider-service links
-    const allProviderServices = await db.select().from(providerServices);
-    
-    // Get all providers
-    const allProviders = await db.select().from(providers);
-    
-    console.log('🔍 DEBUG INFO:');
-    console.log('Total services:', allServices.length);
-    console.log('Total providerServices entries:', allProviderServices.length);
-    console.log('Total providers:', allProviders.length);
-    
-    return c.json({
-      summary: {
-        totalServices: allServices.length,
-        totalProviderServices: allProviderServices.length,
-        totalProviders: allProviders.length
-      },
-      services: allServices.slice(0, 3),
-      providerServices: allProviderServices.slice(0, 10),
-      providers: allProviders.slice(0, 3)
-    });
-  } catch (error) {
-    console.error('Debug error:', error);
-    return c.json({ error: 'Debug failed' }, 500);
   }
 });
 
