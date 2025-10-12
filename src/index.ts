@@ -38,6 +38,7 @@ import { prettyJSON } from 'hono/pretty-json';
 import adminSettingsRoutes from './routes/provider/settings.js';
 import smsResetRoutes from './routes/provider/smsReset.js';
 import productSellerProfile from './routes/provider/ProductSellerProfile.js';
+import serviceNotifications from './routes/provider/serviceNotifications.js';
 import { Readable } from 'stream';
 
 import { eq, and, or, gte, lte, inArray } from 'drizzle-orm';
@@ -262,6 +263,7 @@ app.route('/api/testimonials', testimonialsRouter);
 app.route('/api/admin/categories', adminCategories);
 app.route('/api/service-requests', serviceRequestsRoutes);
 app.route('/api/product-seller', productSellerProfile);
+app.route('/api', serviceNotifications);
 //forgot password routes
 app.route('/api/auth', smsResetRoutes);
 
