@@ -54,17 +54,16 @@ serviceRoutes.get('/services/debug', async (c) => {
       providerServices: allProviderServices.slice(0, 20),
       providers: allProviders.slice(0, 3)
     });
-} catch (error) {
-  console.error('Debug error:', error);
-  
-  if (error instanceof Error) {
-    return c.json({ error: 'Debug failed', details: error.message }, 500);
+  } catch (error) {
+    console.error('Debug error:', error);
+    
+    if (error instanceof Error) {
+      return c.json({ error: 'Debug failed', details: error.message }, 500);
+    }
+
+    // Fallback for non-Error values
+    return c.json({ error: 'Debug failed', details: String(error) }, 500);
   }
-
-  // Fallback for non-Error values
-  return c.json({ error: 'Debug failed', details: String(error) }, 500);
-}
-
 });
 
 // Get service categories with counts
@@ -154,19 +153,18 @@ serviceRoutes.get('/services', async (c) => {
     
     return c.json(result);
     
- } catch (err) {
-  console.error('❌ Services error:', err);
+  } catch (err) {
+    console.error('❌ Services error:', err);
 
-  if (err instanceof Error) {
-    console.error('Error details:', err.message);
-    console.error('Stack:', err.stack);
-    return c.json({ error: 'Failed to fetch services', details: err.message }, 500);
+    if (err instanceof Error) {
+      console.error('Error details:', err.message);
+      console.error('Stack:', err.stack);
+      return c.json({ error: 'Failed to fetch services', details: err.message }, 500);
+    }
+
+    // Fallback if it's not an Error object (e.g. a string or object)
+    return c.json({ error: 'Failed to fetch services', details: String(err) }, 500);
   }
-
-  // Fallback if it's not an Error object (e.g. a string or object)
-  return c.json({ error: 'Failed to fetch services', details: String(err) }, 500);
-}
-
 });
 
 // Get single service type with all providers
@@ -212,7 +210,17 @@ serviceRoutes.get('/services/:id', async (c) => {
       completedRequests: item.provider.completedRequests,
       address: item.provider.address,
       profileImageUrl: item.provider.profileImageUrl,
-      user: item.user || {},
+      // IMPORTANT: phoneNumber is the correct field name from the schema
+      phone: item.provider.phoneNumber || item.user?.contact_phone || null,
+      user: item.user ? {
+        id: item.user.id,
+        full_name: item.user.full_name,
+        email: item.user.email,
+        contact_phone: item.user.contact_phone,
+        address: item.user.address,
+        avatar: item.user.avatar,
+        role: item.user.role
+      } : null,
       price: item.providerService?.price || null
     }));
 
@@ -223,6 +231,7 @@ serviceRoutes.get('/services/:id', async (c) => {
     };
 
     console.log('✅ Service details prepared with', formattedProviders.length, 'providers');
+    console.log('📱 Sample provider phone:', formattedProviders[0]?.phone);
 
     return c.json(serviceData);
   } catch (err) {
