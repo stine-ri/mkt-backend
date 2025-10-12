@@ -7,8 +7,8 @@ import {
   users, 
   serviceRequests,
   notifications 
-} from '../../drizzle/schema.js';
-import type { TIServiceRequests } from '../../drizzle/schema.js';
+} from '../../drizzle/schema';
+import type { TIServiceRequests } from '../../drizzle/schema';
 import { eq } from 'drizzle-orm';
 import { whatsappService } from '../../services/whatsappServices.js';
 
@@ -56,11 +56,21 @@ enhancedServiceNotifications.post('/services/notify/batch-enhanced', async (c) =
       }, 404);
     }
 
-    // Generate WhatsApp message
+    // Log received data for debugging
+    console.log('Received client info:', clientInfo);
+    console.log('Received request details:', requestDetails);
+
+    // Generate WhatsApp message with properly mapped fields
     const whatsappMessage = whatsappService.generateServiceRequestMessage(
       serviceName, 
-      { ...requestDetails, ...clientInfo }
+      { 
+        ...requestDetails, 
+        clientName: clientInfo.name,
+        clientPhone: clientInfo.phone
+      }
     );
+
+    console.log('Generated WhatsApp message:', whatsappMessage);
 
     // Generate WhatsApp URLs for all providers
     const whatsappUrls = whatsappService.generateBatchWhatsAppUrls(
@@ -73,7 +83,7 @@ enhancedServiceNotifications.post('/services/notify/batch-enhanced', async (c) =
       const [notification] = await db.insert(notifications).values({
         userId: provider.id,
         type: 'service_request',
-        message: `New ${serviceName} request from ${clientInfo.name}`,
+        message: `New ${serviceName} request from ${clientInfo.name || 'a client'}`,
         relatedEntityId: parsedServiceId,
         isRead: false,
         createdAt: new Date()
@@ -107,7 +117,7 @@ enhancedServiceNotifications.post('/services/notify/batch-enhanced', async (c) =
       status: 'pending',
       urgency: 'normal',
       location: requestDetails.location || null,
-      clientNotes: `Contact method: ${requestDetails.contactMethod}. Client phone: ${clientInfo.phone}`,
+      clientNotes: `Contact method: ${requestDetails.contactMethod}. Client: ${clientInfo.name}. Phone: ${clientInfo.phone}`,
       providerResponse: null,
       chatRoomId: null,
       createdAt: new Date(),
@@ -184,7 +194,11 @@ enhancedServiceNotifications.post('/services/whatsapp-urls', async (c) => {
 
     const whatsappMessage = whatsappService.generateServiceRequestMessage(
       serviceName, 
-      { ...requestDetails, ...clientInfo }
+      { 
+        ...requestDetails, 
+        clientName: clientInfo.name,
+        clientPhone: clientInfo.phone
+      }
     );
 
     // Generate URLs
