@@ -30,6 +30,7 @@ publicProduct.get('/', async (c) => {
             id: true,
             firstName: true,
             lastName: true,
+            phoneNumber: true, // Added phone number
             rating: true,
             profileImageUrl: true
           }
@@ -50,6 +51,7 @@ publicProduct.get('/', async (c) => {
         id: product.provider?.id,
         firstName: product.provider?.firstName || '',
         lastName: product.provider?.lastName || '',
+        phone: product.provider?.phoneNumber || '', // Added phone
         rating: product.provider?.rating,
         profileImageUrl: product.provider?.profileImageUrl
       }
@@ -87,6 +89,7 @@ publicProduct.get('/search', async (c) => {
         categoryDescription: categories.description,
         providerFirstName: providers.firstName,
         providerLastName: providers.lastName,
+        providerPhone: providers.phoneNumber, // Added phone number
         providerRating: providers.rating,
         providerProfileImage: providers.profileImageUrl
       })
@@ -139,6 +142,7 @@ publicProduct.get('/search', async (c) => {
         provider: {
           firstName: product.providerFirstName || '',
           lastName: product.providerLastName || '',
+          phone: product.providerPhone || '', // Added phone
           rating: product.providerRating,
           profileImageUrl: product.providerProfileImage
         }
@@ -169,6 +173,7 @@ publicProduct.get('/search', async (c) => {
             id: true,
             firstName: true,
             lastName: true,
+            phoneNumber: true, // Added phone number
             rating: true,
             profileImageUrl: true
           }
@@ -185,6 +190,7 @@ publicProduct.get('/search', async (c) => {
         id: product.provider?.id,
         firstName: product.provider?.firstName || '',
         lastName: product.provider?.lastName || '',
+        phone: product.provider?.phoneNumber || '', // Added phone
         rating: product.provider?.rating,
         profileImageUrl: product.provider?.profileImageUrl
       }
@@ -229,6 +235,7 @@ publicProduct.get('/:id', async (c) => {
             id: true,
             firstName: true,
             lastName: true,
+            phoneNumber: true, // Added phone number
             rating: true,
             profileImageUrl: true
           }
@@ -249,6 +256,7 @@ publicProduct.get('/:id', async (c) => {
         id: result.provider?.id,
         firstName: result.provider?.firstName || '',
         lastName: result.provider?.lastName || '',
+        phone: result.provider?.phoneNumber || '', // Added phone
         rating: result.provider?.rating,
         profileImageUrl: result.provider?.profileImageUrl
       }
