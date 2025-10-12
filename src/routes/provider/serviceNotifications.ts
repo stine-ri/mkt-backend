@@ -7,8 +7,8 @@ import {
   users, 
   serviceRequests,
   notifications 
-} from '../../drizzle/schema';
-import type { TIServiceRequests } from '../../drizzle/schema';
+} from '../../drizzle/schema.js';
+import type { TIServiceRequests } from '../../drizzle/schema.js';
 import { eq } from 'drizzle-orm';
 import { whatsappService } from '../../services/whatsappServices.js';
 
