@@ -12,16 +12,25 @@ export class WhatsAppService {
       clientPhone
     } = clientRequest;
 
-    return `🛎️ *NEW SERVICE REQUEST*\n\n` +
-      `*Service:* ${serviceName}\n` +
-      `*Client:* ${clientName}\n` +
-      `*Phone:* ${clientPhone}\n` +
-      `*Location:* ${location}\n` +
-      `*Budget:* ${budget || 'Not specified'}\n` +
-      `*Preferred Date:* ${preferredDate || 'Flexible'}\n` +
-      `*Description:* ${description}\n\n` +
-      `💡 *This request has been sent to multiple providers. Respond quickly to secure this client!*\n\n` +
-      `Best regards,\nMarketplace Team`;
+    return `🛎️ *NEW SERVICE REQUEST* 🛎️\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `📋 *Service:* ${serviceName}\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `👤 *Client Details:*\n` +
+      `   • Name: ${clientName}\n` +
+      `   • Phone: ${clientPhone}\n` +
+      `   • Location: ${location}\n\n` +
+      `💰 *Budget:* ${budget ? `KES ${budget}` : 'Negotiable'}\n` +
+      `📅 *Preferred Date:* ${preferredDate || 'Flexible'}\n` +
+      `📝 *Description:*\n${description}\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `⚡ *Action Required:*\n` +
+      `This request has been sent to multiple providers.\n` +
+      `*Respond quickly to secure this client!*\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `🌐 Visit: *quisells.com*\n` +
+      `📧 Questions? Email: *ombongidiaz@gmail.com*\n\n` +
+      `Powered by Quisells Marketplace 🚀`;
   }
 
   // Generate WhatsApp URL (for direct browser opening)

@@ -7,8 +7,8 @@ import {
   users, 
   serviceRequests,
   notifications 
-} from '../../drizzle/schema.js';
-import type { TIServiceRequests } from '../../drizzle/schema.js';
+} from '../../drizzle/schema';
+import type { TIServiceRequests } from '../../drizzle/schema';
 import { eq } from 'drizzle-orm';
 import { whatsappService } from '../../services/whatsappServices.js';
 
@@ -101,46 +101,54 @@ enhancedServiceNotifications.post('/services/notify/batch-enhanced', async (c) =
 
     const notificationResults = await Promise.all(notificationPromises);
 
-    // Get first provider ID for the service request
-    const firstProviderId = serviceProviders[0].id;
+    // Create service request records for EACH provider (not just the first one)
+    const serviceRequestPromises = serviceProviders.map(async (provider) => {
+      const serviceRequestData: TIServiceRequests = {
+        clientId: clientUserId,
+        providerId: provider.id,
+        serviceId: parsedServiceId,
+        requestTitle: `Service Request: ${serviceName}`,
+        description: requestDetails.description || null,
+        budgetMin: requestDetails.budget ? String(parseFloat(requestDetails.budget)) : null,
+        budgetMax: requestDetails.budget ? String(parseFloat(requestDetails.budget)) : null,
+        deadline: requestDetails.preferredDate ? new Date(requestDetails.preferredDate) : null,
+        status: 'pending',
+        urgency: 'normal',
+        location: requestDetails.location || null,
+        clientNotes: `Contact method: ${requestDetails.contactMethod}. Client: ${clientInfo.name}. Phone: ${clientInfo.phone}`,
+        providerResponse: null,
+        chatRoomId: null,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
 
-    // Prepare the service request data with explicit typing
-    const serviceRequestData: TIServiceRequests = {
-      clientId: clientUserId,
-      providerId: firstProviderId,
-      serviceId: parsedServiceId,
-      requestTitle: `Service Request: ${serviceName}`,
-      description: requestDetails.description || null,
-      budgetMin: requestDetails.budget ? String(parseFloat(requestDetails.budget)) : null,
-      budgetMax: requestDetails.budget ? String(parseFloat(requestDetails.budget)) : null,
-      deadline: requestDetails.preferredDate ? new Date(requestDetails.preferredDate) : null,
-      status: 'pending',
-      urgency: 'normal',
-      location: requestDetails.location || null,
-      clientNotes: `Contact method: ${requestDetails.contactMethod}. Client: ${clientInfo.name}. Phone: ${clientInfo.phone}`,
-      providerResponse: null,
-      chatRoomId: null,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
+      const [serviceRequest] = await db
+        .insert(serviceRequests)
+        .values(serviceRequestData)
+        .returning();
 
-    // Create service request record
-    const [serviceRequest] = await db
-      .insert(serviceRequests)
-      .values(serviceRequestData)
-      .returning();
+      return {
+        providerId: provider.id,
+        providerName: `${provider.firstName} ${provider.lastName}`,
+        serviceRequestId: serviceRequest.id
+      };
+    });
+
+    const serviceRequestResults = await Promise.all(serviceRequestPromises);
 
     console.log('✅ Enhanced batch notification completed:', {
       serviceId: parsedServiceId,
       serviceName,
       totalProviders: serviceProviders.length,
-      serviceRequestId: serviceRequest.id
+      serviceRequestsCreated: serviceRequestResults.length,
+      serviceRequestIds: serviceRequestResults.map(r => r.serviceRequestId)
     });
-
+  // Use the first service request ID from the results
+    const firstServiceRequestId = serviceRequestResults[0]?.serviceRequestId;
     return c.json({
       success: true,
       message: `Service request created and ${serviceProviders.length} providers notified`,
-      serviceRequestId: serviceRequest.id,
+       serviceRequestId: firstServiceRequestId,
       notifications: notificationResults,
       whatsappMessage: whatsappMessage,
       totalProviders: serviceProviders.length
@@ -192,6 +200,8 @@ enhancedServiceNotifications.post('/services/whatsapp-urls', async (c) => {
 
     const serviceName = service[0]?.name || 'Service';
 
+    console.log('WhatsApp URLs - Client info received:', clientInfo);
+
     const whatsappMessage = whatsappService.generateServiceRequestMessage(
       serviceName, 
       { 
@@ -200,6 +210,8 @@ enhancedServiceNotifications.post('/services/whatsapp-urls', async (c) => {
         clientPhone: clientInfo.phone
       }
     );
+
+    console.log('Generated message for WhatsApp URLs:', whatsappMessage);
 
     // Generate URLs
     const urls = whatsappService.generateBatchWhatsAppUrls(serviceProviders, whatsappMessage);
