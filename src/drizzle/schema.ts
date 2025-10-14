@@ -41,10 +41,13 @@ export const ticketCategoryEnum = pgEnum('ticket_category', [
 export const testimonialStatusEnum = pgEnum('testimonial_status', ['pending', 'approved', 'rejected']);
 
 // Service request status enum
-export const serviceRequestStatusEnum = pgEnum('service_request_status', ['pending', 'accepted', 'declined', 'completed']);
+export const serviceRequestStatusEnum = pgEnum('service_request_status', ['pending', 'accepted', 'declined', 'completed', 'cancelled']);
 
 // Service request urgency enum  
 export const serviceRequestUrgencyEnum = pgEnum('service_request_urgency', ['low', 'normal', 'high', 'urgent']);
+
+
+
 
   // Users Table
   export const users = pgTable("users", {
@@ -733,6 +736,7 @@ export const requestImagesRelations = relations(requestImages, ({ one }) => ({
     references: [requests.id]
   })
 }));
+
 
 // Export types for TypeScript support
 export type TIUsers = typeof users.$inferInsert;

@@ -95,25 +95,31 @@ smsServiceNotifications.post('/services/notify/batch-sms', async (c) => {
 
     const notificationResults = await Promise.all(notificationPromises);
 
-    // Create service request records for EACH provider
+    // Create service request records for EACH provider - FIXED VERSION
     const serviceRequestPromises = serviceProviders.map(async (provider) => {
-      const serviceRequestData: TIServiceRequests = {
+      // Convert budget to numeric format for your schema
+      const budgetValue = requestDetails.budget ? 
+        String(parseFloat(requestDetails.budget.replace(/[^\d.]/g, '')) || '0') : '0';
+      
+      // FIX: Use the correct enum values from your schema
+      const serviceRequestData = {
         clientId: clientUserId,
         providerId: provider.id,
         serviceId: parsedServiceId,
         requestTitle: `Service Request: ${serviceName}`,
         description: requestDetails.description || null,
-        budgetMin: requestDetails.budget ? String(parseFloat(requestDetails.budget)) : null,
-        budgetMax: requestDetails.budget ? String(parseFloat(requestDetails.budget)) : null,
+        budgetMin: budgetValue,
+        budgetMax: budgetValue,
         deadline: requestDetails.preferredDate ? new Date(requestDetails.preferredDate) : null,
-        status: 'pending',
-        urgency: 'normal',
+        status: 'pending' as const, // Use enum value with type assertion
+        urgency: 'normal' as const, // Use enum value with type assertion
         location: requestDetails.location || null,
         clientNotes: `Contact method: ${requestDetails.contactMethod}. Client: ${clientInfo.name}. Phone: ${clientInfo.phone}`,
         providerResponse: null,
         chatRoomId: null,
         createdAt: new Date(),
-        updatedAt: new Date()
+        updatedAt: new Date(),
+        respondedAt: null
       };
 
       const [serviceRequest] = await db
