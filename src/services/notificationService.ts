@@ -1,6 +1,6 @@
-// services/notificationService.ts
+// services/notificationService.ts - UPDATED VERSION
 export class NotificationService {
-  // Generate professional SMS message for service request
+  // Generate professional SMS message for service request with clickable phone
   generateServiceRequestMessage(serviceName: string, clientRequest: any): string {
     const {
       description,
@@ -12,16 +12,26 @@ export class NotificationService {
     } = clientRequest;
 
     return `🛎️ NEW SERVICE REQUEST - Quisells\n\n` +
-      `Service: ${serviceName}\n` +
-      `Client: ${clientName}\n` +
-      `Phone: ${clientPhone}\n` +
-      `Location: ${location}\n` +
-      `Budget: ${budget ? `KES ${budget}` : 'Negotiable'}\n` +
-      `Preferred Date: ${preferredDate || 'Flexible'}\n` +
-      `Description: ${description}\n\n` +
-      `This request has been sent to multiple providers. Respond quickly to secure this client!\n\n` +
-      `Visit: quisells.com\n` +
-      `From Quisells Team`;
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `📋 *Service:* ${serviceName}\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `👤 *Client Details:*\n` +
+      `   • Name: ${clientName}\n` +
+      `   • Phone: ${clientPhone} 📞\n` +
+      `   • Location: ${location}\n\n` +
+      `💰 *Budget:* ${budget ? `KES ${budget}` : 'Negotiable'}\n` +
+      `📅 *Preferred Date:* ${preferredDate || 'Flexible'}\n` +
+      `📝 *Description:*\n${description}\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `⚡ *ACTION REQUIRED:*\n` +
+      `This request has been sent to multiple providers.\n` +
+      `*Respond quickly to secure this client!*\n\n` +
+      `📞 *Call Client:* ${clientPhone}\n` +
+      `💬 *Message Client:* ${clientPhone}\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `🌐 Visit: *quisells.com*\n` +
+      `📧 Support: *ombongidiaz@gmail.com*\n\n` +
+      `Powered by Quisells Marketplace 🚀`;
   }
 
   // Validate phone number
