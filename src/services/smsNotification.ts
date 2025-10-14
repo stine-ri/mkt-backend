@@ -1,4 +1,4 @@
-// services/smsNotificationService.ts
+// services/smsNotificationService.ts - UPDATED WITH DETAILED LOGGING
 import { config } from 'dotenv';
 
 config();
@@ -34,11 +34,21 @@ const sendQuickSMS = async (phone: string, message: string): Promise<SMSResponse
       mobile: formattedPhone
     };
 
-    console.log('🔧 QuickSMS Notification Request:', { 
-      phone: formattedPhone,
+    console.log('🔧 QuickSMS Notification Request Details:', { 
+      phone: phone,
+      formattedPhone: formattedPhone,
       messageLength: message.length,
       hasApiKey: !!process.env.QUICKSMS_API_KEY,
-      hasPartnerId: !!process.env.QUICKSMS_PARTNER_ID
+      hasPartnerId: !!process.env.QUICKSMS_PARTNER_ID,
+      hasShortcode: !!process.env.QUICKSMS_SHORTCODE,
+      endpoint: endpoint
+    });
+
+    // Log the actual request (hide sensitive data)
+    console.log('📤 QuickSMS Request Body (sanitized):', {
+      ...requestBody,
+      apikey: process.env.QUICKSMS_API_KEY ? '***SET***' : '***MISSING***',
+      partnerID: process.env.QUICKSMS_PARTNER_ID ? '***SET***' : '***MISSING***'
     });
     
     const response = await fetch(endpoint, {
@@ -51,33 +61,46 @@ const sendQuickSMS = async (phone: string, message: string): Promise<SMSResponse
     });
 
     const responseText = await response.text();
-    console.log('📊 QuickSMS Notification Response Status:', response.status);
+    console.log('📊 QuickSMS Response Status:', response.status);
+    console.log('📊 QuickSMS Response Headers:', Object.fromEntries(response.headers.entries()));
     console.log('📊 QuickSMS Response Body:', responseText);
 
     let data;
     try {
       data = JSON.parse(responseText);
+      console.log('📊 QuickSMS Parsed JSON:', data);
     } catch (e) {
-      console.error('🔥 Failed to parse QuickSMS response as JSON');
+      console.error('🔥 Failed to parse QuickSMS response as JSON. Raw response:', responseText);
       return { 
         success: false, 
         error: `Invalid JSON response: ${responseText}`,
         provider: 'QuickSMS',
-        details: { responseText, status: response.status }
+        details: { 
+          responseText, 
+          status: response.status,
+          headers: Object.fromEntries(response.headers.entries())
+        }
       };
     }
 
     // FIXED: Better response code checking
-    const responseCode = data['response-code'] || data['responseCode'] || data['code'];
+    const responseCode = data['response-code'] || data['responseCode'] || data['code'] || data.status;
     
-    console.log('Response code received:', responseCode, 'Type:', typeof responseCode);
+    console.log('🔍 QuickSMS Response Analysis:', {
+      responseCode: responseCode,
+      responseCodeType: typeof responseCode,
+      responseOk: response.ok,
+      hasResponseDescription: !!data['response-description'],
+      hasMessage: !!data.message,
+      hasErrors: !!data.errors
+    });
 
     // Handle success cases
-    if ((response.ok && responseCode === 200) || responseCode === '200') {
-      console.log('✅ SMS sent successfully');
+    if ((response.ok && responseCode === 200) || responseCode === '200' || data.responses?.[0]?.status === 'Success') {
+      console.log('✅ SMS sent successfully to', formattedPhone);
       return {
         success: true,
-        messageId: data.messageid || data.messageId || `quick-${Date.now()}`,
+        messageId: data.messageid || data.messageId || data.responses?.[0]?.messageid || `quick-${Date.now()}`,
         provider: 'QuickSMS'
       };
     }
@@ -96,6 +119,8 @@ const sendQuickSMS = async (phone: string, message: string): Promise<SMSResponse
         errorMessage = `Invalid phone number: ${data.errors.mobile[0] || 'Phone number format error'}`;
       } else if (data.errors?.apikey) {
         errorMessage = `API Key error: ${data.errors.apikey[0] || 'Invalid API key'}`;
+      } else if (data.errors?.partnerID) {
+        errorMessage = `Partner ID error: ${data.errors.partnerID[0] || 'Invalid Partner ID'}`;
       } else {
         errorMessage = 'Validation errors occurred: ' + JSON.stringify(data.errors);
       }
@@ -105,25 +130,31 @@ const sendQuickSMS = async (phone: string, message: string): Promise<SMSResponse
     } else if (responseCode === 1008 || responseCode === '1008') {
       errorMessage = 'Insufficient balance on QuickSMS account';
       console.error('🔥 Insufficient balance');
+    } else if (responseCode === 1001 || responseCode === '1001') {
+      errorMessage = 'Invalid mobile number format';
+      console.error('🔥 Invalid mobile number format');
     } else if (data['response-description']) {
       errorMessage = data['response-description'];
     } else if (data.message) {
       errorMessage = data.message;
     } else if (data.error) {
       errorMessage = data.error;
+    } else if (data.responses?.[0]?.status === 'Failed') {
+      errorMessage = data.responses[0].description || 'SMS delivery failed';
     }
 
-    console.error(`❌ QuickSMS Error: ${errorMessage}`);
+    console.error(`❌ QuickSMS Error for ${formattedPhone}: ${errorMessage}`);
+    console.error('❌ Full error details:', data);
 
     return { 
       success: false, 
       error: errorMessage,
       provider: 'QuickSMS',
-      details: { ...data, errorDetails }
+      details: { ...data, errorDetails, responseCode }
     };
     
   } catch (error) {
-    console.error('🔥 QuickSMS Notification error:', error);
+    console.error('🔥 QuickSMS Network error:', error);
     return { 
       success: false, 
       error: `QuickSMS network error: ${error instanceof Error ? error.message : String(error)}`,
@@ -133,30 +164,36 @@ const sendQuickSMS = async (phone: string, message: string): Promise<SMSResponse
   }
 };
 
-// Alternative QuickSMS implementation using query parameters
+// Alternative QuickSMS implementation using different parameters
 const sendQuickSMSAlternative = async (phone: string, message: string): Promise<SMSResponse> => {
   try {
     const formattedPhone = formatPhoneNumber(phone);
     
-    // Try URL encoded form approach as alternative
+    // Try different parameter combinations
     const endpoint = 'https://quicksms.advantasms.com/api/services/sendsms';
     
-    const params = new URLSearchParams({
-      apikey: process.env.QUICKSMS_API_KEY || '',
-      partnerID: process.env.QUICKSMS_PARTNER_ID || '',
+    const requestBody = {
+      apikey: process.env.QUICKSMS_API_KEY,
+      partnerID: process.env.QUICKSMS_PARTNER_ID,
       message: message,
-      sender: process.env.QUICKSMS_SENDER_ID || 'QUISELLS',
+      shortcode: process.env.QUICKSMS_SHORTCODE || process.env.QUICKSMS_SENDER_ID || 'QUISELLS',
       mobile: formattedPhone
-    });
+    };
 
-    console.log('🔄 Trying QuickSMS alternative method with sender ID');
+    console.log('🔄 Trying QuickSMS alternative method with parameters:', {
+      phone: formattedPhone,
+      hasShortcode: !!process.env.QUICKSMS_SHORTCODE,
+      hasSenderId: !!process.env.QUICKSMS_SENDER_ID,
+      using: process.env.QUICKSMS_SHORTCODE || process.env.QUICKSMS_SENDER_ID || 'QUISELLS'
+    });
 
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
       },
-      body: params.toString()
+      body: JSON.stringify(requestBody)
     });
 
     const responseText = await response.text();
@@ -204,12 +241,16 @@ const sendQuickSMSAlternative = async (phone: string, message: string): Promise<
 
 // Main SMS notification function
 export const sendSMSNotification = async (phone: string, message: string): Promise<SMSResponse> => {
-  console.log('📱 Attempting to send SMS notification to:', formatPhoneNumber(phone));
-  console.log('📝 Message length:', message.length);
+  console.log('\n🚀 ========== STARTING SMS SEND ==========');
+  console.log('📱 Attempting to send SMS to:', phone);
+  console.log('📱 Formatted phone:', formatPhoneNumber(phone));
+  console.log('📝 Message preview:', message.substring(0, 100) + '...');
+  console.log('📏 Message length:', message.length);
 
   // Validate phone number first
   const cleaned = phone.replace(/\D/g, '');
   if (cleaned.length < 9) {
+    console.error('❌ Phone number validation failed:', { original: phone, cleaned: cleaned });
     return {
       success: false,
       error: `Invalid phone number: ${phone} (too short after cleaning)`,
@@ -217,34 +258,39 @@ export const sendSMSNotification = async (phone: string, message: string): Promi
     };
   }
 
+  console.log('✅ Phone number validated:', { original: phone, cleaned: cleaned, formatted: formatPhoneNumber(phone) });
+
   // Try QuickSMS first
+  console.log('\n🔄 Attempting primary QuickSMS method...');
   const quickSMSResult = await sendQuickSMS(phone, message);
   
   if (quickSMSResult.success) {
-    console.log('✅ SMS notification sent successfully via QuickSMS');
+    console.log('🎉 PRIMARY METHOD SUCCESS: SMS sent successfully via QuickSMS');
     return quickSMSResult;
   }
   
-  console.log('❌ QuickSMS failed:', quickSMSResult.error);
+  console.log('❌ Primary method failed:', quickSMSResult.error);
 
   // If authentication or shortcode is the issue, try alternative method
   if (quickSMSResult.error?.includes('Shortcode') || 
       quickSMSResult.error?.includes('Sender ID') ||
-      quickSMSResult.error?.includes('Authentication')) {
-    console.log('🔄 Trying QuickSMS alternative method...');
+      quickSMSResult.error?.includes('Authentication') ||
+      quickSMSResult.error?.includes('Validation')) {
+    console.log('\n🔄 Attempting alternative QuickSMS method...');
     const altResult = await sendQuickSMSAlternative(phone, message);
     
     if (altResult.success) {
-      console.log('✅ SMS notification sent successfully via QuickSMS alternative');
+      console.log('🎉 ALTERNATIVE METHOD SUCCESS: SMS sent successfully via QuickSMS alternative');
       return altResult;
     }
     
-    console.log('❌ QuickSMS alternative failed:', altResult.error);
+    console.log('❌ Alternative method failed:', altResult.error);
     return altResult;
   }
 
   // All methods failed
-  console.log('💀 All QuickSMS methods failed');
+  console.log('💀 ALL METHODS FAILED for phone:', phone);
+  console.log('========== SMS SEND COMPLETED ==========\n');
   return {
     success: false,
     error: quickSMSResult.error || 'QuickSMS failed: Unknown error',
@@ -263,13 +309,21 @@ export const sendBulkSMSNotifications = async (
   error?: string;
   providerName?: string;
   providerId?: number;
+  details?: any;
 }>> => {
-  console.log(`📨 Sending bulk SMS notifications to ${providers.length} providers`);
+  console.log(`\n📨 ========== BULK SMS STARTING ==========`);
+  console.log(`📨 Sending to ${providers.length} providers`);
+  console.log('👥 Providers:', providers.map(p => ({
+    name: `${p.firstName} ${p.lastName}`,
+    phone: p.phoneNumber,
+    formatted: formatPhoneNumber(p.phoneNumber)
+  })));
   
   const results = [];
   
-  for (const provider of providers) {
-    console.log(`📲 Sending to ${provider.firstName} ${provider.lastName}: ${provider.phoneNumber}`);
+  for (let i = 0; i < providers.length; i++) {
+    const provider = providers[i];
+    console.log(`\n📲 [${i + 1}/${providers.length}] Sending to ${provider.firstName} ${provider.lastName}: ${provider.phoneNumber}`);
     
     const result = await sendSMSNotification(provider.phoneNumber, message);
     
@@ -280,15 +334,30 @@ export const sendBulkSMSNotifications = async (
       providerName: provider.firstName && provider.lastName 
         ? `${provider.firstName} ${provider.lastName}` 
         : undefined,
-      providerId: provider.id
+      providerId: provider.id,
+      details: result.details
     });
     
-    // Delay between SMS to avoid rate limiting (100ms between each)
-    await new Promise(resolve => setTimeout(resolve, 100));
+    // Delay between SMS to avoid rate limiting
+    await new Promise(resolve => setTimeout(resolve, 200));
   }
   
   const successful = results.filter(r => r.success).length;
-  console.log(`✅ Bulk SMS completed: ${successful}/${providers.length} successful`);
+  const failed = results.filter(r => !r.success).length;
+  
+  console.log(`\n📊 ========== BULK SMS SUMMARY ==========`);
+  console.log(`📊 Total: ${providers.length}`);
+  console.log(`✅ Successful: ${successful}`);
+  console.log(`❌ Failed: ${failed}`);
+  
+  if (failed > 0) {
+    console.log('❌ Failed SMS details:');
+    results.filter(r => !r.success).forEach((failedResult, index) => {
+      console.log(`  ${index + 1}. ${failedResult.providerName}: ${failedResult.phoneNumber} - ${failedResult.error}`);
+    });
+  }
+  
+  console.log('========== BULK SMS COMPLETED ==========\n');
   
   return results;
 };
