@@ -218,30 +218,110 @@ app.get('/', async (c: Context<CustomContext>) => {
     console.log('🎯 Service IDs for provider:', serviceIds);
 
     // Helper function to process location data
-    function processLocation(rawLocation: any) {
-      if (!rawLocation) {
-        console.log('📍 No raw location data');
-        return null;
-      }
-      // ... rest of your location processing code
-      return null;
-    }
+   // Replace your processLocation function with this complete implementation:
 
-    // Helper function to format the response data - FIXED: Added cleanRow definition
-    function formatResponseData(rows: any[]) {
-      return rows.map((row, index) => {
-        // Create cleanRow by removing unwanted properties or transforming the row
-        const { raw_location, ...cleanRow } = row;
-        const location = processLocation(row.raw_location);
+function processLocation(rawLocation: any) {
+  if (!rawLocation) {
+    console.log('📍 No raw location data');
+    return {
+      address: 'Not specified',
+      lat: null,
+      lng: null
+    };
+  }
 
+  try {
+    let locationData = rawLocation;
+    
+    // If it's a string, try to parse it as JSON
+    if (typeof rawLocation === 'string') {
+      try {
+        locationData = JSON.parse(rawLocation);
+      } catch (parseError) {
+        console.warn('📍 Failed to parse location string:', rawLocation);
+        // If it's not JSON but a plain string, treat it as an address
         return {
-          ...cleanRow,
-          location,
-          created_at: row.created_at,
-          createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+          address: rawLocation === '{}' || rawLocation.trim() === '' 
+            ? 'Not specified' 
+            : rawLocation,
+          lat: null,
+          lng: null
         };
-      });
+      }
     }
+
+    // Handle object format
+    if (typeof locationData === 'object' && locationData !== null) {
+      // Check for various possible property names
+      const address = locationData.address || 
+                     locationData.formatted_address || 
+                     locationData.name || 
+                     'Not specified';
+      
+      const lat = locationData.lat || 
+                  locationData.latitude || 
+                  locationData.coords?.latitude || 
+                  null;
+      
+      const lng = locationData.lng || 
+                  locationData.lon ||
+                  locationData.longitude || 
+                  locationData.coords?.longitude || 
+                  null;
+
+      return {
+        address: address === 'Not specified' && lat && lng 
+          ? `${lat.toFixed(4)}, ${lng.toFixed(4)}` 
+          : address,
+        lat: lat ? Number(lat) : null,
+        lng: lng ? Number(lng) : null
+      };
+    }
+
+    // Fallback for any other type
+    return {
+      address: 'Not specified',
+      lat: null,
+      lng: null
+    };
+
+  } catch (error) {
+    console.error('📍 Error processing location:', error);
+    return {
+      address: 'Location processing error',
+      lat: null,
+      lng: null
+    };
+  }
+}
+
+// Then update your formatResponseData function to use it properly:
+function formatResponseData(rows: any[]) {
+  return rows.map((row) => {
+    const { raw_location, ...cleanRow } = row;
+    const location = processLocation(raw_location);
+
+    console.log(`📍 Processed location for request ${row.id}:`, {
+      raw: raw_location,
+      processed: location
+    });
+
+    return {
+      ...cleanRow,
+      location, // This will now be a proper object with address, lat, lng
+      created_at: row.created_at,
+      createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+      // Ensure these fields are present for frontend compatibility
+      serviceName: row.service_name || 'Service Request',
+      client: row.user_id ? {
+        id: row.user_id,
+        name: row.user_full_name || 'Unknown Client',
+        email: row.user_email || '',
+        phone: row.user_phone || ''
+      } : null
+    };
+  });
+}
 
     // NEW: Function to fetch service list requests
    // In your provider requests route - FIXED VERSION
