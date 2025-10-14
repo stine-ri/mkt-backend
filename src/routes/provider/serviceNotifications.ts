@@ -1,3 +1,4 @@
+// routes/services/sms-notifications.ts
 import { Hono } from 'hono';
 import { db } from '../../drizzle/db.js';
 import { 
@@ -7,15 +8,16 @@ import {
   users, 
   serviceRequests,
   notifications 
-} from '../../drizzle/schema';
-import type { TIServiceRequests } from '../../drizzle/schema';
+} from '../../drizzle/schema.js';
+import type { TIServiceRequests } from '../../drizzle/schema.js';
 import { eq } from 'drizzle-orm';
-import { whatsappService } from '../../services/whatsappServices.js';
+import { notificationService } from '../../services/notificationService.js';
+import { sendBulkSMSNotifications } from '../../services/smsNotification.js';
 
-const enhancedServiceNotifications = new Hono();
+const smsServiceNotifications = new Hono();
 
-// Enhanced batch notification with WhatsApp URL generation
-enhancedServiceNotifications.post('/services/notify/batch-enhanced', async (c) => {
+// Enhanced batch notification with SMS
+smsServiceNotifications.post('/services/notify/batch-sms', async (c) => {
   try {
     const body = await c.req.json();
     const {
@@ -56,12 +58,8 @@ enhancedServiceNotifications.post('/services/notify/batch-enhanced', async (c) =
       }, 404);
     }
 
-    // Log received data for debugging
-    console.log('Received client info:', clientInfo);
-    console.log('Received request details:', requestDetails);
-
-    // Generate WhatsApp message with properly mapped fields
-    const whatsappMessage = whatsappService.generateServiceRequestMessage(
+    // Generate SMS message
+    const smsMessage = notificationService.generateServiceRequestMessage(
       serviceName, 
       { 
         ...requestDetails, 
@@ -70,13 +68,10 @@ enhancedServiceNotifications.post('/services/notify/batch-enhanced', async (c) =
       }
     );
 
-    console.log('Generated WhatsApp message:', whatsappMessage);
+    console.log('Generated SMS message:', smsMessage);
 
-    // Generate WhatsApp URLs for all providers
-    const whatsappUrls = whatsappService.generateBatchWhatsAppUrls(
-      serviceProviders, 
-      whatsappMessage
-    );
+    // Send SMS notifications to all providers
+    const smsResults = await sendBulkSMSNotifications(serviceProviders, smsMessage);
 
     // Create notifications in database
     const notificationPromises = serviceProviders.map(async (provider) => {
@@ -94,14 +89,13 @@ enhancedServiceNotifications.post('/services/notify/batch-enhanced', async (c) =
         providerName: `${provider.firstName} ${provider.lastName}`,
         phoneNumber: provider.phoneNumber,
         notificationId: notification.id,
-        whatsappUrl: whatsappService.generateWhatsAppUrl(provider.phoneNumber, whatsappMessage),
         timestamp: new Date().toISOString()
       };
     });
 
     const notificationResults = await Promise.all(notificationPromises);
 
-    // Create service request records for EACH provider (not just the first one)
+    // Create service request records for EACH provider
     const serviceRequestPromises = serviceProviders.map(async (provider) => {
       const serviceRequestData: TIServiceRequests = {
         clientId: clientUserId,
@@ -136,26 +130,31 @@ enhancedServiceNotifications.post('/services/notify/batch-enhanced', async (c) =
 
     const serviceRequestResults = await Promise.all(serviceRequestPromises);
 
-    console.log('✅ Enhanced batch notification completed:', {
+    const successfulSMS = smsResults.filter(r => r.success).length;
+    
+    console.log('✅ SMS batch notification completed:', {
       serviceId: parsedServiceId,
       serviceName,
       totalProviders: serviceProviders.length,
-      serviceRequestsCreated: serviceRequestResults.length,
-      serviceRequestIds: serviceRequestResults.map(r => r.serviceRequestId)
+      successfulSMS: successfulSMS,
+      serviceRequestsCreated: serviceRequestResults.length
     });
-  // Use the first service request ID from the results
+
     const firstServiceRequestId = serviceRequestResults[0]?.serviceRequestId;
+    
     return c.json({
       success: true,
-      message: `Service request created and ${serviceProviders.length} providers notified`,
-       serviceRequestId: firstServiceRequestId,
+      message: `Service request created and SMS sent to ${successfulSMS}/${serviceProviders.length} providers`,
+      serviceRequestId: firstServiceRequestId,
       notifications: notificationResults,
-      whatsappMessage: whatsappMessage,
-      totalProviders: serviceProviders.length
+      smsResults: smsResults,
+      totalProviders: serviceProviders.length,
+      successfulSMS: successfulSMS,
+      smsMessage: smsMessage
     });
 
   } catch (error) {
-    console.error('Error in enhanced batch notification:', error);
+    console.error('Error in SMS batch notification:', error);
     return c.json({ 
       success: false, 
       error: 'Failed to process service request',
@@ -164,8 +163,8 @@ enhancedServiceNotifications.post('/services/notify/batch-enhanced', async (c) =
   }
 });
 
-// Get WhatsApp URLs for manual notification (frontend can open these)
-enhancedServiceNotifications.post('/services/whatsapp-urls', async (c) => {
+// Get SMS notification status
+smsServiceNotifications.post('/services/sms-status', async (c) => {
   try {
     const body = await c.req.json();
     const { serviceId, clientInfo, requestDetails } = body;
@@ -191,7 +190,7 @@ enhancedServiceNotifications.post('/services/whatsapp-urls', async (c) => {
       .innerJoin(providers, eq(providerServices.providerId, providers.id))
       .where(eq(providerServices.serviceId, parsedServiceId));
 
-    // Generate WhatsApp message
+    // Generate SMS message
     const service = await db
       .select()
       .from(services)
@@ -200,9 +199,7 @@ enhancedServiceNotifications.post('/services/whatsapp-urls', async (c) => {
 
     const serviceName = service[0]?.name || 'Service';
 
-    console.log('WhatsApp URLs - Client info received:', clientInfo);
-
-    const whatsappMessage = whatsappService.generateServiceRequestMessage(
+    const smsMessage = notificationService.generateServiceRequestMessage(
       serviceName, 
       { 
         ...requestDetails, 
@@ -211,27 +208,24 @@ enhancedServiceNotifications.post('/services/whatsapp-urls', async (c) => {
       }
     );
 
-    console.log('Generated message for WhatsApp URLs:', whatsappMessage);
-
-    // Generate URLs
-    const urls = whatsappService.generateBatchWhatsAppUrls(serviceProviders, whatsappMessage);
+    const notificationData = notificationService.generateBatchNotificationsData(serviceProviders, smsMessage);
 
     return c.json({
       success: true,
       serviceName,
-      message: whatsappMessage,
-      urls: urls.filter(url => url.isValid),
+      message: smsMessage,
+      providers: notificationData,
       totalProviders: serviceProviders.length,
-      validProviders: urls.filter(url => url.isValid).length
+      validProviders: notificationData.filter(item => item.isValid).length
     });
 
   } catch (error) {
-    console.error('Error generating WhatsApp URLs:', error);
+    console.error('Error generating SMS status:', error);
     return c.json({ 
       success: false, 
-      error: 'Failed to generate WhatsApp URLs' 
+      error: 'Failed to generate SMS status' 
     }, 500);
   }
 });
 
-export default enhancedServiceNotifications;
+export default smsServiceNotifications;
