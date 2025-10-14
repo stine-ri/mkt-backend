@@ -6,9 +6,9 @@ import { eq, and, lte, gte, sql, desc, count, ilike, or } from 'drizzle-orm';
 import { authMiddleware, serviceProviderRoleAuth } from '../../middleware/bearAuth.js';
 import type { CustomContext } from '../../types/context.js';
 import { notifyNearbyProviders } from '../../lib/providerNotifications.js';
-import { RouteError } from '../../utils/error.js';
-import { uploadToCloudinary, deleteFromCloudinary } from '../../utils/cloudinary.js';
-import { FileUploadError } from '../../utils/error.js';
+import { RouteError } from '../../utilis/error.js';
+import { uploadToCloudinary, deleteFromCloudinary } from '../../utilis/cloudinary.js';
+import { FileUploadError } from '../../utilis/error.js';
 
 const app = new Hono<CustomContext>();
 
@@ -146,6 +146,7 @@ async function fetchRegularRequests(
 }
 
 // MAIN PROVIDER REQUESTS ROUTE - Get relevant requests for provider
+
 app.get('/', async (c: Context<CustomContext>) => {
   const startTime = Date.now();
   let userId: number | undefined;
@@ -153,45 +154,20 @@ app.get('/', async (c: Context<CustomContext>) => {
   try {
     console.log('🚀 Starting provider requests route');
 
-    // Extract and validate user
     const user = c.get('user');
-    console.log('👤 User from context:', {
-      id: user?.id,
-      role: user?.role,
-      type: typeof user?.id
-    });
-
     if (!user || !user.id) {
-      console.error('❌ No user found in context');
       throw new RouteError('User not authenticated', 401);
     }
 
     userId = Number(user.id);
     if (isNaN(userId)) {
-      console.error('❌ Invalid user ID:', {
-        originalId: user.id,
-        convertedId: userId
-      });
       throw new RouteError('Invalid user ID format', 400);
     }
 
-    console.log('✅ User ID validated:', userId);
-
-    // Extract query parameters
     const queryParams = c.req.query();
     const { lat, lng, range = '50', filterByServices = 'false' } = queryParams;
 
-    console.log('📍 Query parameters:', {
-      lat,
-      lng,
-      range,
-      filterByServices,
-      allParams: queryParams
-    });
-
-    // Database query for provider
-    console.log('🔍 Fetching provider profile for user:', userId);
-
+    // Fetch provider profile
     const provider = await db.query.providers.findFirst({
       where: eq(providers.userId, userId),
       with: {
@@ -201,136 +177,79 @@ app.get('/', async (c: Context<CustomContext>) => {
       }
     });
 
-    console.log('📊 Provider query result:', {
-      found: !!provider,
-      providerId: provider?.id,
-      collegeId: provider?.collegeId,
-      servicesCount: provider?.services?.length || 0
-    });
-
     if (!provider) {
-      console.warn('⚠️ Provider profile not found for user:', userId);
       return c.json({ error: 'Provider profile not found' }, 404);
     }
 
     const providerId = provider.id;
     const serviceIds = provider.services.map((s) => s.serviceId);
-    console.log('🎯 Service IDs for provider:', serviceIds);
 
-    // Helper function to process location data
-   // Replace your processLocation function with this complete implementation:
+    // Fetch both types of requests
+    const [regularRequests, serviceListRequestsData] = await Promise.all([
+      fetchRegularRequests(provider, serviceIds, filterByServices, lat, lng, range),
+      fetchServiceListRequests(providerId)
+    ]);
 
-function processLocation(rawLocation: any) {
-  if (!rawLocation) {
-    console.log('📍 No raw location data');
-    return {
-      address: 'Not specified',
-      lat: null,
-      lng: null
-    };
-  }
+    // Process both types
+    const processedRegularRequests = formatResponseData(regularRequests || []);
+    const processedServiceListRequests = formatResponseData(serviceListRequestsData || []);
 
-  try {
-    let locationData = rawLocation;
-    
-    // If it's a string, try to parse it as JSON
-    if (typeof rawLocation === 'string') {
-      try {
-        locationData = JSON.parse(rawLocation);
-      } catch (parseError) {
-        console.warn('📍 Failed to parse location string:', rawLocation);
-        // If it's not JSON but a plain string, treat it as an address
-        return {
-          address: rawLocation === '{}' || rawLocation.trim() === '' 
-            ? 'Not specified' 
-            : rawLocation,
-          lat: null,
-          lng: null
-        };
+    // ========== KEY FIX: Prevent duplicates by tracking IDs ==========
+    const seenIds = new Set<number>();
+    const uniqueRequests: any[] = [];
+
+    // Process regular requests first (they take priority)
+    processedRegularRequests.forEach((req: any) => {
+      if (!seenIds.has(req.id)) {
+        seenIds.add(req.id);
+        uniqueRequests.push({
+          ...req,
+          requestSource: 'regular',
+          originalRequestType: 'regular',
+          fromServiceList: false
+        });
+      } else {
+        console.warn(`⚠️ Skipping duplicate regular request ID: ${req.id}`);
       }
-    }
-
-    // Handle object format
-    if (typeof locationData === 'object' && locationData !== null) {
-      // Check for various possible property names
-      const address = locationData.address || 
-                     locationData.formatted_address || 
-                     locationData.name || 
-                     'Not specified';
-      
-      const lat = locationData.lat || 
-                  locationData.latitude || 
-                  locationData.coords?.latitude || 
-                  null;
-      
-      const lng = locationData.lng || 
-                  locationData.lon ||
-                  locationData.longitude || 
-                  locationData.coords?.longitude || 
-                  null;
-
-      return {
-        address: address === 'Not specified' && lat && lng 
-          ? `${lat.toFixed(4)}, ${lng.toFixed(4)}` 
-          : address,
-        lat: lat ? Number(lat) : null,
-        lng: lng ? Number(lng) : null
-      };
-    }
-
-    // Fallback for any other type
-    return {
-      address: 'Not specified',
-      lat: null,
-      lng: null
-    };
-
-  } catch (error) {
-    console.error('📍 Error processing location:', error);
-    return {
-      address: 'Location processing error',
-      lat: null,
-      lng: null
-    };
-  }
-}
-
-// Then update your formatResponseData function to use it properly:
-function formatResponseData(rows: any[]) {
-  return rows.map((row) => {
-    const { raw_location, ...cleanRow } = row;
-    const location = processLocation(raw_location);
-
-    console.log(`📍 Processed location for request ${row.id}:`, {
-      raw: raw_location,
-      processed: location
     });
 
-    return {
-      ...cleanRow,
-      location, // This will now be a proper object with address, lat, lng
-      created_at: row.created_at,
-      createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
-      // Ensure these fields are present for frontend compatibility
-      serviceName: row.service_name || 'Service Request',
-      client: row.user_id ? {
-        id: row.user_id,
-        name: row.user_full_name || 'Unknown Client',
-        email: row.user_email || '',
-        phone: row.user_phone || ''
-      } : null
-    };
-  });
-}
+    // Then process service list requests, but only if ID not already seen
+    processedServiceListRequests.forEach((req: any) => {
+      if (!seenIds.has(req.id)) {
+        seenIds.add(req.id);
+        uniqueRequests.push({
+          ...req,
+          requestSource: 'service_list',
+          originalRequestType: 'service_list',
+          fromServiceList: true
+        });
+      } else {
+        console.warn(`⚠️ Skipping duplicate service_list request ID: ${req.id}`);
+      }
+    });
 
-    // NEW: Function to fetch service list requests
-   // In your provider requests route - FIXED VERSION
+    console.log('📊 Request summary:', {
+      regularRequests: processedRegularRequests.length,
+      serviceListRequests: processedServiceListRequests.length,
+      duplicatesSkipped: (processedRegularRequests.length + processedServiceListRequests.length) - uniqueRequests.length,
+      finalCount: uniqueRequests.length
+    });
+
+    return c.json(uniqueRequests);
+
+  } catch (error: unknown) {
+    console.error('💥 Route error occurred:', error);
+    return c.json({ error: 'Internal server error' }, 500);
+  }
+});
+
+// ========== UPDATED fetchServiceListRequests ==========
 const fetchServiceListRequests = async (providerId: number) => {
   try {
     console.log('🔍 Fetching service list requests for provider:', providerId);
     
     const serviceListRequests = await db.execute(sql`
-      SELECT 
+      SELECT DISTINCT ON (sr.id)
         sr.id,
         sr.client_id as user_id,
         sr.service_id,
@@ -362,7 +281,7 @@ const fetchServiceListRequests = async (providerId: number) => {
       LEFT JOIN services s ON s.id = sr.service_id
       WHERE sr.provider_id = ${providerId}
         AND sr.status = 'pending'
-      ORDER BY sr.created_at DESC
+      ORDER BY sr.id, sr.created_at DESC
       LIMIT 50
     `);
 
@@ -377,41 +296,37 @@ const fetchServiceListRequests = async (providerId: number) => {
   }
 };
 
-    // Fetch both regular requests and service list requests
-    const [regularRequests, serviceListRequestsData] = await Promise.all([
-      fetchRegularRequests(provider, serviceIds, filterByServices, lat, lng, range),
-      fetchServiceListRequests(providerId)
-    ]);
-
-    // Process and combine both types of requests
-    const processedRegularRequests = formatResponseData(regularRequests || []);
-    const processedServiceListRequests = formatResponseData(serviceListRequestsData || []);
-
-    // Add source identifier to service list requests
-    const serviceListRequestsWithSource = processedServiceListRequests.map(req => ({
-      ...req,
-      requestSource: 'service_list',
-      originalRequestType: 'service_list'
-    }));
-
-    // Combine both request types
-    const allRequests = [...processedRegularRequests, ...serviceListRequestsWithSource];
-
-    console.log('📊 Combined requests summary:', {
-      regularRequests: processedRegularRequests.length,
-      serviceListRequests: processedServiceListRequests.length,
-      total: allRequests.length
-    });
-
-    return c.json(allRequests);
-
-  } catch (error: unknown) {
-    console.error('💥 Route error occurred:', error);
-    // Your existing error handling...
-    return c.json({ error: 'Internal server error' }, 500);
-  }
-});
-
+// ========== MISSING FUNCTION: formatResponseData ==========
+const formatResponseData = (requests: any[]): any[] => {
+  return requests.map((request: any) => ({
+    id: request.id,
+    user_id: request.user_id,
+    service_id: request.service_id,
+    title: request.title,
+    description: request.description,
+    budget: request.budget,
+    status: request.status,
+    created_at: request.created_at,
+    raw_location: request.raw_location,
+    deadline: request.deadline,
+    client_notes: request.client_notes,
+    is_service: request.is_service,
+    allow_interests: request.allow_interests,
+    allow_bids: request.allow_bids,
+    accepted_bid_id: request.accepted_bid_id,
+    college_filter_id: request.college_filter_id,
+    user_email: request.user_email,
+    user_role: request.user_role,
+    user_full_name: request.user_full_name,
+    user_phone: request.user_phone,
+    service_name: request.service_name,
+    college_name: request.college_name,
+    bids: request.bids || [],
+    interests: request.interests || [],
+    from_service_list: request.from_service_list || false,
+    target_provider_id: request.target_provider_id
+  }));
+};
 // USER REQUESTS ROUTE - Get user's own requests with interests/bids
 app.get('/my-requests', async (c) => {
   try {

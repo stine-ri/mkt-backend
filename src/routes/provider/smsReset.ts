@@ -8,7 +8,7 @@ import {
   Authentication 
 } from '../../drizzle/schema.js';
 import { eq, and, gt } from 'drizzle-orm';
-import { generateRandomCode, hashPassword } from '../../utils/auth.js';
+import { generateRandomCode, hashPassword } from '../../utilis/auth.js';
 import { sendSMS, sendMockSMS } from '../../services/smsService.js';
 import { logVerificationCode } from '../../services/verificationService.js';
 import bcrypt from 'bcrypt';

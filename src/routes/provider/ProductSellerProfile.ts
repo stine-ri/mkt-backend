@@ -5,7 +5,7 @@ import { productSellers, colleges, products } from '../../drizzle/schema.js';
 import { eq, and , like, or , SQL} from 'drizzle-orm';
 import { authMiddleware, productSellerRoleAuth } from '../../middleware/bearAuth.js';
 import type { CustomContext } from '../../types/context.js';
-import { uploadToCloudinary, deleteFromCloudinary } from '../../utils/cloudinary.js';
+import { uploadToCloudinary, deleteFromCloudinary } from '../../utilis/cloudinary.js';
 
 const app = new Hono<CustomContext>();
 

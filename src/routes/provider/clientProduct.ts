@@ -11,7 +11,7 @@ import {
   
 } from '../../drizzle/schema.js';
 import { authMiddleware } from '../../middleware/bearAuth.js';
-import { ValidationError } from '../../utils/error.js';
+import { ValidationError } from '../../utilis/error.js';
 
 const clientProducts = new Hono()
   .use('*', authMiddleware);

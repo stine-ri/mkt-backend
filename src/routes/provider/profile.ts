@@ -6,7 +6,7 @@ import { eq, and, or, like, inArray } from 'drizzle-orm';
 import { authMiddleware, serviceProviderRoleAuth } from '../../middleware/bearAuth.js';
 import type { CustomContext } from '../../types/context.js';
 import type { Service } from '../../types/types.js';
-import { uploadToCloudinary, deleteFromCloudinary } from '../../utils/cloudinary.js';
+import { uploadToCloudinary, deleteFromCloudinary } from '../../utilis/cloudinary.js';
 import type { InferInsertModel } from 'drizzle-orm'
 const app = new Hono<CustomContext>();
 

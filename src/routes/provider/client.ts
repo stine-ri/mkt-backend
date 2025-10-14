@@ -15,8 +15,8 @@ import {
 } from '../../drizzle/schema.js';
 
 import { authMiddleware, clientRoleAuth } from '../../middleware/bearAuth.js';
-import { normalizeUrl } from '../../utils/normalizeUrl.js'; 
-import { uploadToCloudinary, deleteFromCloudinary } from '../../utils/cloudinary.js';
+import { normalizeUrl } from '../../utilis/normalizeUrl.js'; 
+import { uploadToCloudinary, deleteFromCloudinary } from '../../utilis/cloudinary.js';
 
 const app = new Hono()
   .use('*', authMiddleware)
