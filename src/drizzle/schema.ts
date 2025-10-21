@@ -450,6 +450,35 @@ export const passwordResetTokensRelations = relations(passwordResetTokens, ({ on
     references: [users.id],
   }),
 }));
+
+// Reviews Table
+export const reviews = pgTable('reviews', {
+  id: serial('id').primaryKey(),
+  providerId: integer('provider_id').notNull().references(() => providers.id, { onDelete: 'cascade' }),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  rating: integer('rating').notNull(), // 1-5
+  comment: text('comment'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => ({
+  providerIdIdx: index('idx_reviews_provider_id').on(table.providerId),
+  userIdIdx: index('idx_reviews_user_id').on(table.userId),
+  // Ensure a user can only review a provider once
+  uniqueUserProvider: unique('unique_user_provider_review').on(table.userId, table.providerId),
+}));
+
+// Reviews Relations
+export const reviewsRelations = relations(reviews, ({ one }) => ({
+  provider: one(providers, {
+    fields: [reviews.providerId],
+    references: [providers.id],
+  }),
+  user: one(users, {
+    fields: [reviews.userId],
+    references: [users.id],
+  }),
+}));
+
 // Add relations
 export const supportTicketsRelations = relations(supportTickets, ({ many, one }) => ({
   user: one(users, {
@@ -581,6 +610,7 @@ export const providerRelations = relations(providers, ({ many, one }) => ({
   interests: many(interests),
   pastWorks: many(pastWorks), 
   testimonials: many(testimonials),
+    reviews: many(reviews)
 }));
 
 export const collegeRelations = relations(colleges, ({ many }) => ({
@@ -834,3 +864,7 @@ export type TSServiceRequestsWithRelations = TSServiceRequests & {
   service?: TSServices | null;
   chatRoom?: typeof chatRooms.$inferSelect | null;
 };
+
+// Export types
+export type TIReviews = typeof reviews.$inferInsert;
+export type TSReviews = typeof reviews.$inferSelect;

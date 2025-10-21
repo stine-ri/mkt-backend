@@ -39,6 +39,7 @@ import adminSettingsRoutes from './routes/provider/settings.js';
 import smsResetRoutes from './routes/provider/smsReset.js';
 import productSellerProfile from './routes/provider/ProductSellerProfile.js';
 import serviceNotifications from './routes/provider/serviceNotifications.js';
+import reviewRoutes from './routes/provider/review.js';
 import { Readable } from 'stream';
 
 import { eq, and, or, gte, lte, inArray } from 'drizzle-orm';
@@ -266,6 +267,8 @@ app.route('/api/product-seller', productSellerProfile);
 app.route('/api', serviceNotifications);
 //forgot password routes
 app.route('/api/auth', smsResetRoutes);
+//reviews
+app.route('/api/reviews', reviewRoutes);
 
 // PROTECTED Admin endpoints (CREATE/UPDATE/DELETE operations)
 app.post('/api/services', async (c) => {
