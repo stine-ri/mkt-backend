@@ -204,6 +204,13 @@
       "when": 1758394163404,
       "tag": "0028_nebulous_nomad",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1761061871027,
+      "tag": "0029_nice_inhumans",
+      "breakpoints": true
     }
   ]
 }
