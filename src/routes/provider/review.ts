@@ -13,7 +13,6 @@ reviewRoutes.post('/', authMiddleware, async (c: Context<CustomContext>) => {
   try {
     const user = c.get('user');
     
-    // Validate user exists
     if (!user || !user.id) {
       return c.json({
         success: false,
@@ -22,8 +21,6 @@ reviewRoutes.post('/', authMiddleware, async (c: Context<CustomContext>) => {
     }
 
     const userId = parseInt(user.id);
-    
-    // Validate userId is a valid number
     if (isNaN(userId)) {
       return c.json({
         success: false,
@@ -50,12 +47,23 @@ reviewRoutes.post('/', authMiddleware, async (c: Context<CustomContext>) => {
       }, 400);
     }
 
-    // Validate rating is a number
-    const ratingNum = parseFloat(rating);
+    // Validate rating is a number and convert to integer
+    let ratingNum;
+    if (typeof rating === 'string') {
+      ratingNum = parseInt(rating);
+    } else if (typeof rating === 'number') {
+      ratingNum = Math.round(rating);
+    } else {
+      return c.json({
+        success: false,
+        error: 'Rating must be a number'
+      }, 400);
+    }
+
     if (isNaN(ratingNum) || ratingNum < 1 || ratingNum > 5) {
       return c.json({
         success: false,
-        error: 'Rating must be a number between 1 and 5'
+        error: 'Rating must be a whole number between 1 and 5'
       }, 400);
     }
 
@@ -79,7 +87,7 @@ reviewRoutes.post('/', authMiddleware, async (c: Context<CustomContext>) => {
       }, 403);
     }
 
-    // Check if user has already reviewed this provider
+    // Check if user has already reviewed this provider (using the unique constraint)
     const existingReview = await db.query.reviews.findFirst({
       where: and(
         eq(reviews.userId, userId),
@@ -90,15 +98,15 @@ reviewRoutes.post('/', authMiddleware, async (c: Context<CustomContext>) => {
     if (existingReview) {
       return c.json({
         success: false,
-        error: 'You have already reviewed this provider'
+        error: 'You have already reviewed this provider. You can update your existing review instead.'
       }, 409);
     }
 
-    // Create the review - rating must be integer for the schema
+    // Create the review
     const [newReview] = await db.insert(reviews).values({
       userId,
       providerId: providerIdNum,
-      rating: Math.round(ratingNum), // Convert to integer
+      rating: ratingNum,
       comment: comment?.trim() || null,
     }).returning();
 
@@ -115,11 +123,11 @@ reviewRoutes.post('/', authMiddleware, async (c: Context<CustomContext>) => {
     const averageRating = stats?.averageRating || 0;
     const reviewCount = stats?.reviewCount || 0;
 
-    // Update provider's rating - must be integer to match schema
+    // Update provider's rating - convert to integer to match schema
     await db
       .update(providers)
       .set({ 
-        rating: Math.round(averageRating) // Store as integer
+        rating: Math.round(averageRating)
       })
       .where(eq(providers.id, providerIdNum));
 
@@ -130,18 +138,21 @@ reviewRoutes.post('/', authMiddleware, async (c: Context<CustomContext>) => {
       reviewCount
     }, 201);
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error creating review:', error);
     
-    // Log more details for debugging
-    if (error instanceof Error) {
-      console.error('Error stack:', error.stack);
+    // Handle specific database errors
+    if (error.code === '23505') { // Unique violation
+      return c.json({
+        success: false,
+        error: 'You have already reviewed this provider'
+      }, 409);
     }
     
     return c.json({
       success: false,
       error: 'Failed to create review',
-      details: error instanceof Error ? error.message : String(error)
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     }, 500);
   }
 });
@@ -204,4 +215,99 @@ reviewRoutes.get('/provider/:providerId', async (c: Context<CustomContext>) => {
   }
 });
 
+// PUT /api/reviews/:reviewId 
+reviewRoutes.put('/:reviewId', authMiddleware, async (c: Context<CustomContext>) => {
+  try {
+    const user = c.get('user');
+    const reviewId = parseInt(c.req.param('reviewId'));
+
+    if (!user || !user.id) {
+      return c.json({ success: false, error: 'User not authenticated' }, 401);
+    }
+
+    if (isNaN(reviewId)) {
+      return c.json({ success: false, error: 'Invalid review ID' }, 400);
+    }
+
+    const userId = parseInt(user.id);
+    const { rating, comment } = await c.req.json();
+
+    // Check if review exists and belongs to user
+    const existingReview = await db.query.reviews.findFirst({
+      where: and(
+        eq(reviews.id, reviewId),
+        eq(reviews.userId, userId)
+      )
+    });
+
+    if (!existingReview) {
+      return c.json({ 
+        success: false, 
+        error: 'Review not found or you do not have permission to update it' 
+      }, 404);
+    }
+
+    // Validate rating if provided
+    let ratingNum = existingReview.rating;
+    if (rating !== undefined) {
+      if (typeof rating === 'string') {
+        ratingNum = parseInt(rating);
+      } else if (typeof rating === 'number') {
+        ratingNum = Math.round(rating);
+      }
+      
+      if (isNaN(ratingNum) || ratingNum < 1 || ratingNum > 5) {
+        return c.json({
+          success: false,
+          error: 'Rating must be a whole number between 1 and 5'
+        }, 400);
+      }
+    }
+
+    // Update the review
+    const [updatedReview] = await db
+      .update(reviews)
+      .set({
+        rating: ratingNum,
+        comment: comment?.trim() || null,
+        updatedAt: new Date()
+      })
+      .where(eq(reviews.id, reviewId))
+      .returning();
+
+    // Recalculate average rating for the provider
+    const ratingStats = await db
+      .select({
+        averageRating: sql<number>`COALESCE(ROUND(AVG(${reviews.rating})::numeric, 1), 0)`,
+        reviewCount: sql<number>`COUNT(*)::int`,
+      })
+      .from(reviews)
+      .where(eq(reviews.providerId, existingReview.providerId));
+
+    const stats = ratingStats[0];
+    const averageRating = stats?.averageRating || 0;
+
+    // Update provider's rating
+    await db
+      .update(providers)
+      .set({ 
+        rating: Math.round(averageRating)
+      })
+      .where(eq(providers.id, existingReview.providerId));
+
+    return c.json({
+      success: true,
+      data: updatedReview,
+      averageRating,
+      reviewCount: stats?.reviewCount || 0
+    });
+
+  } catch (error) {
+    console.error('Error updating review:', error);
+    return c.json({
+      success: false,
+      error: 'Failed to update review'
+    }, 500);
+  }
+});
 export default reviewRoutes;
