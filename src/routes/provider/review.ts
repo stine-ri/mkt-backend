@@ -11,8 +11,26 @@ const reviewRoutes = new Hono<CustomContext>();
 // POST /api/reviews - Create a new review
 reviewRoutes.post('/', authMiddleware, async (c: Context<CustomContext>) => {
   try {
-   const user = c.get('user');
-const userId = parseInt(user.id); 
+    const user = c.get('user');
+    
+    // Validate user exists
+    if (!user || !user.id) {
+      return c.json({
+        success: false,
+        error: 'User not authenticated'
+      }, 401);
+    }
+
+    const userId = parseInt(user.id);
+    
+    // Validate userId is a valid number
+    if (isNaN(userId)) {
+      return c.json({
+        success: false,
+        error: 'Invalid user ID'
+      }, 400);
+    }
+
     const { providerId, rating, comment } = await c.req.json();
 
     // Validate input
@@ -23,16 +41,27 @@ const userId = parseInt(user.id);
       }, 400);
     }
 
-    if (rating < 1 || rating > 5) {
+    // Validate providerId is a number
+    const providerIdNum = parseInt(providerId);
+    if (isNaN(providerIdNum)) {
       return c.json({
         success: false,
-        error: 'Rating must be between 1 and 5'
+        error: 'Invalid provider ID'
+      }, 400);
+    }
+
+    // Validate rating is a number
+    const ratingNum = parseFloat(rating);
+    if (isNaN(ratingNum) || ratingNum < 1 || ratingNum > 5) {
+      return c.json({
+        success: false,
+        error: 'Rating must be a number between 1 and 5'
       }, 400);
     }
 
     // Check if provider exists
     const provider = await db.query.providers.findFirst({
-      where: eq(providers.id, providerId)
+      where: eq(providers.id, providerIdNum)
     });
 
     if (!provider) {
@@ -54,7 +83,7 @@ const userId = parseInt(user.id);
     const existingReview = await db.query.reviews.findFirst({
       where: and(
         eq(reviews.userId, userId),
-        eq(reviews.providerId, providerId)
+        eq(reviews.providerId, providerIdNum)
       )
     });
 
@@ -65,32 +94,34 @@ const userId = parseInt(user.id);
       }, 409);
     }
 
-    // Create the review
+    // Create the review - rating must be integer for the schema
     const [newReview] = await db.insert(reviews).values({
       userId,
-      providerId,
-      rating,
+      providerId: providerIdNum,
+      rating: Math.round(ratingNum), // Convert to integer
       comment: comment?.trim() || null,
     }).returning();
 
     // Calculate new average rating for the provider
     const ratingStats = await db
       .select({
-        averageRating: sql<number>`ROUND(AVG(${reviews.rating})::numeric, 1)`,
+        averageRating: sql<number>`COALESCE(ROUND(AVG(${reviews.rating})::numeric, 1), 0)`,
         reviewCount: sql<number>`COUNT(*)::int`,
       })
       .from(reviews)
-      .where(eq(reviews.providerId, providerId));
+      .where(eq(reviews.providerId, providerIdNum));
 
-    const { averageRating, reviewCount } = ratingStats[0];
+    const stats = ratingStats[0];
+    const averageRating = stats?.averageRating || 0;
+    const reviewCount = stats?.reviewCount || 0;
 
-    // Update provider's rating
+    // Update provider's rating - must be integer to match schema
     await db
       .update(providers)
       .set({ 
-        rating: Math.round(averageRating * 10) / 10 // Round to 1 decimal
+        rating: Math.round(averageRating) // Store as integer
       })
-      .where(eq(providers.id, providerId));
+      .where(eq(providers.id, providerIdNum));
 
     return c.json({
       success: true,
@@ -101,6 +132,12 @@ const userId = parseInt(user.id);
 
   } catch (error) {
     console.error('Error creating review:', error);
+    
+    // Log more details for debugging
+    if (error instanceof Error) {
+      console.error('Error stack:', error.stack);
+    }
+    
     return c.json({
       success: false,
       error: 'Failed to create review',
@@ -113,6 +150,13 @@ const userId = parseInt(user.id);
 reviewRoutes.get('/provider/:providerId', async (c: Context<CustomContext>) => {
   try {
     const providerId = parseInt(c.req.param('providerId'));
+
+    if (isNaN(providerId)) {
+      return c.json({
+        success: false,
+        error: 'Invalid provider ID'
+      }, 400);
+    }
 
     const providerReviews = await db.query.reviews.findMany({
       where: eq(reviews.providerId, providerId),
@@ -128,10 +172,10 @@ reviewRoutes.get('/provider/:providerId', async (c: Context<CustomContext>) => {
       orderBy: (reviews, { desc }) => [desc(reviews.createdAt)]
     });
 
-    // Get rating stats
+    // Get rating stats - handle case when there are no reviews
     const ratingStats = await db
       .select({
-        averageRating: sql<number>`ROUND(AVG(${reviews.rating})::numeric, 1)`,
+        averageRating: sql<number>`COALESCE(ROUND(AVG(${reviews.rating})::numeric, 1), 0)`,
         reviewCount: sql<number>`COUNT(*)::int`,
       })
       .from(reviews)
@@ -141,12 +185,17 @@ reviewRoutes.get('/provider/:providerId', async (c: Context<CustomContext>) => {
       success: true,
       data: {
         reviews: providerReviews,
-        stats: ratingStats[0]
+        stats: ratingStats[0] || { averageRating: 0, reviewCount: 0 }
       }
     });
 
   } catch (error) {
     console.error('Error fetching reviews:', error);
+    
+    if (error instanceof Error) {
+      console.error('Error stack:', error.stack);
+    }
+    
     return c.json({
       success: false,
       error: 'Failed to fetch reviews',
