@@ -9,7 +9,8 @@ Authorization: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOnsiZnVsbF9uYW1lIjoi
 GET http://localhost:3000/public/all
 ###
 POST http://localhost:3000/api/users
-Content-Type: application/json
+Content-Type: application/jsonSettings Sync: Turn On
+
 
 {
 
