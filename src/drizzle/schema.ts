@@ -127,11 +127,16 @@ export const requests = pgTable('requests', {
   desiredPrice: integer('desired_price').notNull(),
   location: varchar('location', { length: 255 }).notNull(),
   collegeFilterId: integer('college_filter_id').references(() => colleges.id),
-  status: varchar('status', { enum: ['open', 'closed', 'pending'] }).default('open'),
+  status: varchar('status', { enum: ['open', 'closed', 'pending','archived','deleted'] }).default('open'),
   allowInterests: boolean('allow_interests').default(true),
   allowBids: boolean('allow_bids').default(true),
   // Store accepted bid ID without foreign key constraint to avoid circular dependency
   accepted_bid_id: integer('accepted_bid_id'),
+  
+  // New columns for expiration and archival
+  expiresAt: timestamp('expires_at'),
+  archivedAt: timestamp('archived_at'),
+  archivedByClient: boolean('archived_by_client').default(false),
   
   createdAt: timestamp('created_at').defaultNow(),
 });

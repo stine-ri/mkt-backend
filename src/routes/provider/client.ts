@@ -17,6 +17,7 @@ import {
 import { authMiddleware, clientRoleAuth } from '../../middleware/bearAuth.js';
 import { normalizeUrl } from '../../utilis/normalizeUrl.js'; 
 import { uploadToCloudinary, deleteFromCloudinary } from '../../utilis/cloudinary.js';
+import { isAfter, subDays } from 'date-fns';
 
 const app = new Hono()
   .use('*', authMiddleware)
@@ -49,6 +50,9 @@ type QueryResult = {
   allowInterests: boolean | null;
   allowBids: boolean | null;
   accepted_bid_id: number | null;
+  expiresAt: Date | null;  // Add new column
+  archivedAt: Date | null;  // Add new column
+  archivedByClient: boolean | null;  // Add new column
   createdAt: Date | null;
   // Add images type
   images?: Array<{
@@ -255,7 +259,9 @@ const queryOptions = {
     allowInterests: r.allowInterests,
     allowBids: r.allowBids,
     accepted_bid_id: r.accepted_bid_id,
-    
+     expiresAt: r.expiresAt,  // Add new field
+        archivedAt: r.archivedAt,  // Add new field
+        archivedByClient: r.archivedByClient,  // Add new field
     // Add computed fields
     budget: r.desiredPrice,
     title: r.productName || (r.service?.name ?? '') || '',
@@ -330,7 +336,6 @@ images: (r.images || [])
 });
 
 // POST /bids - client sends a bid to a provider
-// Add this to your bids route file
 app.post('/', async (c) => {
   const clientId = Number(c.get('user').id);
   const { providerId, requestId, price, message } = await c.req.json();
@@ -601,6 +606,10 @@ app.post('/requests', async (c) => {
   let requestId: number | null = null;
   
   try {
+    // Set automatic expiration - 7 days from now
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7);
+    
     // Create the request in database
     const [request] = await db.insert(requests).values({
       userId,
@@ -612,6 +621,7 @@ app.post('/requests', async (c) => {
       location: body.location,
       collegeFilterId: body.collegeFilterId ? Number(body.collegeFilterId) : null,
       status: 'open',
+      expiresAt: expiresAt, // Set automatic expiration
     }).returning();
 
     if (!request || !request.id) {
@@ -717,6 +727,143 @@ app.post('/requests', async (c) => {
       message: 'Failed to create request',
       timestamp: new Date().toISOString()
     }, 500);
+  }
+});
+
+// Add expiration and archiving endpoints
+app.patch('/requests/:id/archive', async (c) => {
+  const userId = Number(c.get('user').id);
+  const requestId = parseInt(c.req.param('id'), 10);
+
+  if (isNaN(userId) || isNaN(requestId)) {
+    return c.json({ error: 'Invalid user or request ID' }, 400);
+  }
+
+  try {
+    // Verify request ownership
+    const request = await db.query.requests.findFirst({
+      where: and(
+        eq(requests.id, requestId),
+        eq(requests.userId, userId)
+      )
+    });
+
+    if (!request) {
+      return c.json({ error: 'Request not found or unauthorized' }, 404);
+    }
+
+    // Archive the request
+    const [updatedRequest] = await db.update(requests)
+      .set({ 
+        archivedAt: new Date(),
+        archivedByClient: true,
+        status: 'archived' // Add this status if you want it
+      })
+      .where(eq(requests.id, requestId))
+      .returning();
+
+    return c.json({ 
+      success: true, 
+      message: 'Request archived successfully',
+      request: updatedRequest 
+    });
+
+  } catch (error) {
+    console.error('Error archiving request:', error);
+    return c.json({ error: 'Failed to archive request' }, 500);
+  }
+});
+
+app.patch('/requests/:id/unarchive', async (c) => {
+  const userId = Number(c.get('user').id);
+  const requestId = parseInt(c.req.param('id'), 10);
+
+  if (isNaN(userId) || isNaN(requestId)) {
+    return c.json({ error: 'Invalid user or request ID' }, 400);
+  }
+
+  try {
+    // Verify request ownership
+    const request = await db.query.requests.findFirst({
+      where: and(
+        eq(requests.id, requestId),
+        eq(requests.userId, userId)
+      )
+    });
+
+    if (!request) {
+      return c.json({ error: 'Request not found or unauthorized' }, 404);
+    }
+
+    // Unarchive the request
+    const [updatedRequest] = await db.update(requests)
+      .set({ 
+        archivedAt: null,
+        archivedByClient: false,
+        status: 'open' // Or whatever status it should return to
+      })
+      .where(eq(requests.id, requestId))
+      .returning();
+
+    return c.json({ 
+      success: true, 
+      message: 'Request unarchived successfully',
+      request: updatedRequest 
+    });
+
+  } catch (error) {
+    console.error('Error unarchiving request:', error);
+    return c.json({ error: 'Failed to unarchive request' }, 500);
+  }
+});
+
+app.delete('/requests/:id', async (c) => {
+  const userId = Number(c.get('user').id);
+  const requestId = parseInt(c.req.param('id'), 10);
+
+  if (isNaN(userId) || isNaN(requestId)) {
+    return c.json({ error: 'Invalid user or request ID' }, 400);
+  }
+
+  try {
+    // Verify request ownership
+    const request = await db.query.requests.findFirst({
+      where: and(
+        eq(requests.id, requestId),
+        eq(requests.userId, userId)
+      )
+    });
+
+    if (!request) {
+      return c.json({ error: 'Request not found or unauthorized' }, 404);
+    }
+
+    // Check if request can be deleted (only if no accepted bids/interests)
+    if (request.accepted_bid_id || request.status === 'closed') {
+      return c.json({ 
+        error: 'Cannot delete request with accepted bids or completed status' 
+      }, 400);
+    }
+
+    // Soft delete by archiving
+    const [updatedRequest] = await db.update(requests)
+      .set({ 
+        archivedAt: new Date(),
+        archivedByClient: true,
+        status: 'deleted'
+      })
+      .where(eq(requests.id, requestId))
+      .returning();
+
+    return c.json({ 
+      success: true, 
+      message: 'Request deleted successfully',
+      request: updatedRequest 
+    });
+
+  } catch (error) {
+    console.error('Error deleting request:', error);
+    return c.json({ error: 'Failed to delete request' }, 500);
   }
 });
 
